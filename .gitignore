@@ -4,3 +4,7 @@ __pycache__/
 run/
 *.sock
 agent/agent.json
+backups/
+experiments/
+rtmp-web-draft-*/
+.claude/
