@@ -2661,9 +2661,24 @@ const app = initializeApp({
 });
 const auth = getAuth(app), $ = id => document.getElementById(id);
 const login = $('login'), card = $('loginCard'), err = $('loginErr'), acct = $('acct');
-onAuthStateChanged(auth, user => {
+// The server (auth_gate.js) turns the Google sign-in into a session cookie that nginx checks for
+// every request. Without the cookie the data and videos are refused, so get one, then reload.
+async function openSession(user) {
+  try {
+    const me = await fetch('/auth/me', { cache: 'no-store' });
+    if (me.status !== 401) return true;  // good cookie (or no check on this server, e.g. local testing)
+    const r = await fetch('/auth/session', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: await user.getIdToken() }) });
+    if (r.ok) { location.reload(); return false; }
+    err.textContent = r.status === 403 ? 'This Google account isn\'t allowed here.' : 'Sign-in failed. Try again.';
+    await signOut(auth);
+    return false;
+  } catch { return true; }
+}
+onAuthStateChanged(auth, async user => {
+  if (user && !(await openSession(user))) return;
   login.hidden = !!user;
-  card.hidden = !!user ? true : false;
+  card.hidden = !!user;
   acct.hidden = !user;
   if (user) {
     acct.title = user.email || 'Account';
@@ -2683,7 +2698,7 @@ $('gSignIn').onclick = async () => {
   }
   $('gSignIn').disabled = false;
 };
-acct.onclick = () => { if (confirm(`Sign out${auth.currentUser?.email ? ' ' + auth.currentUser.email : ''}?`)) signOut(auth); };
+acct.onclick = () => { if (confirm(`Sign out${auth.currentUser?.email ? ' ' + auth.currentUser.email : ''}?`)) fetch('/auth/logout', { method: 'POST' }).catch(() => {}).finally(() => signOut(auth).then(() => location.reload())); };
 </script>
 </body>
 </html>
