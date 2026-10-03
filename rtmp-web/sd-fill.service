@@ -1,0 +1,12 @@
+[Unit]
+Description=Fill HD recording gaps from the camera's SD card (sd_fill.js), one gap a run
+After=network-online.target hd-record.service
+
+[Service]
+Type=oneshot
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rtmp-web
+ExecStart=/usr/bin/node /home/ubuntu/rtmp-web/sd_fill.js /home/ubuntu/rtmp-web/state/hd-device.json cam1
+TimeoutStartSec=30min
+Nice=10
+MemoryMax=250M

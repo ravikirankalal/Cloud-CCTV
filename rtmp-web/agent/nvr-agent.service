@@ -1,0 +1,15 @@
+[Unit]
+Description=NVR on-site agent (RTSP/ONVIF cameras -> cloud RTMP)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Adjust paths/user to where you copied the agent.
+ExecStart=/usr/bin/python3 /opt/nvr-agent/nvr_agent.py --config /opt/nvr-agent/agent.json
+Restart=always
+RestartSec=5
+User=nvr
+# ffmpeg must be on PATH (apt install ffmpeg)
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,17 @@
+[Unit]
+Description=On-demand footage enhancement for the recordings page (enhance_api.py)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rtmp-web
+ExecStart=/usr/bin/python3 /home/ubuntu/rtmp-web/enhance_api.py
+Restart=always
+RestartSec=5
+MemoryMax=350M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/rtmp-web/run /home/ubuntu/rtmp-recordings
+
+[Install]
+WantedBy=multi-user.target

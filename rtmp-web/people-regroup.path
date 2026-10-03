@@ -1,0 +1,10 @@
+[Unit]
+Description=Regroups people as soon as a merge or name is saved on the recordings page
+
+[Path]
+# people_api.py writes state/people-feedback-<stream>.json (a new file each time, renamed
+# into place), which changes this folder; runs people-regroup.service
+PathChanged=/home/ubuntu/rtmp-web/state
+
+[Install]
+WantedBy=multi-user.target

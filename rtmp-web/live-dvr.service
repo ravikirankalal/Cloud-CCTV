@@ -1,0 +1,16 @@
+[Unit]
+Description=Rewindable HLS copy of recordings in progress (live_dvr.py)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rtmp-web
+ExecStart=/usr/bin/python3 /home/ubuntu/rtmp-web/live_dvr.py
+Restart=always
+RestartSec=5
+Nice=5
+MemoryMax=200M
+
+[Install]
+WantedBy=multi-user.target

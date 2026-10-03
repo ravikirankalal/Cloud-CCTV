@@ -1,0 +1,7 @@
+{
+  "server": "rtmp://YOUR.SERVER.IP:1935/live",
+  "cameras": [
+    {"key": "frontdoor", "rtsp": "rtsp://admin:password@192.168.1.50:554/stream1"},
+    {"key": "backyard", "onvif": {"host": "192.168.1.51", "user": "admin", "pass": "password"}}
+  ]
+}

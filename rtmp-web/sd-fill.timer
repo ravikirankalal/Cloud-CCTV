@@ -1,0 +1,9 @@
+[Unit]
+Description=Fill HD recording gaps from the SD card at quiet hours (every 30 min, 01:00-06:00)
+
+[Timer]
+OnCalendar=*-*-* 01..05:00/30:00 Asia/Kolkata
+Persistent=false
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,2688 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c0f13" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#f4f6f9" media="(prefers-color-scheme: light)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<title>Stream Recordings</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='9' fill='%23ff4d5e'/%3E%3C/svg%3E">
+<style>
+:root{
+  --bg:#0c0f13; --panel:#14181f; --panel-2:#1a2029; --line:#252d38; --line-2:#323c4a;
+  --text:#e8edf3; --muted:#8b97a7; --faint:#5d6978;
+  --accent:#4d8dff; --accent-soft:rgba(77,141,255,.16);
+  --live:#ff4d5e; --warn:#f2b33d; --motion:#ffd43b; --person:#ff8a65; --pet:#63e6be;
+  --radius:14px; --shadow:0 18px 50px rgba(0,0,0,.45);
+  color-scheme:dark;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --motion:#e39e00; --person:#e8590c; --pet:#0ca678;
+    --bg:#f4f6f9; --panel:#ffffff; --panel-2:#eef1f5; --line:#e0e5ec; --line-2:#cfd6e0;
+    --text:#131922; --muted:#5b6777; --faint:#8c97a5;
+    --accent:#2f6fe8; --accent-soft:rgba(47,111,232,.12);
+    --shadow:0 18px 50px rgba(20,30,50,.18);
+    color-scheme:light;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{background:var(--bg);color:var(--text);font:14px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",sans-serif;-webkit-font-smoothing:antialiased}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;cursor:pointer}
+button:disabled{cursor:default}
+a{color:inherit}
+svg{display:block}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:6px}
+
+/* ---------- top bar ---------- */
+.top{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:14px;padding:12px 24px;background:color-mix(in srgb,var(--bg) 85%,transparent);backdrop-filter:blur(12px);border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:10px;font-weight:650;font-size:16px;letter-spacing:-.01em}
+.brand .dot{width:26px;height:26px;border-radius:8px;background:linear-gradient(135deg,var(--live),#ff8a4d);display:grid;place-items:center;color:#fff}
+.live-pill{display:none;align-items:center;white-space:nowrap;max-width:45vw;overflow:hidden;text-overflow:ellipsis;gap:7px;padding:4px 10px 4px 8px;border-radius:999px;background:rgba(255,77,94,.14);color:var(--live);font-weight:600;font-size:12px}
+.live-pill.on{display:inline-flex}
+.pulse{width:8px;height:8px;border-radius:50%;background:var(--live);animation:pulse 1.4s infinite}
+@keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,77,94,.6)}70%{box-shadow:0 0 0 7px rgba(255,77,94,0)}100%{box-shadow:0 0 0 0 rgba(255,77,94,0)}}
+.spacer{flex:1}
+.updated{color:var(--faint);font-size:12px}
+.icon-btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:34px;padding:0 12px;border-radius:9px;border:1px solid var(--line);background:var(--panel);font-size:13px}
+.icon-btn:hover:not(:disabled){border-color:var(--line-2);background:var(--panel-2)}
+.icon-btn:disabled{opacity:.4}
+.spin svg{animation:spin .8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* ---------- layout ---------- */
+.wrap{max-width:1440px;margin:0 auto;padding:20px 24px 60px}
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:20px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px 16px}
+.stat .k{color:var(--muted);font-size:12px;text-transform:uppercase;letter-spacing:.06em}
+.stat .v{font-size:22px;font-weight:650;margin-top:4px;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.stat .s{color:var(--faint);font-size:12px;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+
+.layout{display:grid;grid-template-columns:280px minmax(0,1fr);gap:20px;align-items:start}
+main,aside{min-width:0}
+html,body{overflow-x:clip}
+aside{position:sticky;top:78px;display:flex;flex-direction:column;gap:14px}
+.box{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:14px}
+.box h3{margin:0 0 10px;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-weight:600}
+
+/* calendar */
+.cal-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
+.cal-head b{font-weight:600}
+.cal-nav{display:flex;gap:4px}
+.cal-nav button{width:28px;height:28px;border-radius:7px;display:grid;place-items:center;color:var(--muted)}
+.cal-nav button:hover{background:var(--panel-2);color:var(--text)}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px;text-align:center}
+.cal-grid .wd{font-size:11px;color:var(--faint);padding:2px 0 4px}
+.cd{position:relative;aspect-ratio:1;border-radius:8px;font-size:12.5px;font-variant-numeric:tabular-nums;color:var(--faint)}
+.cd.l1,.cd.l2,.cd.l3{color:var(--text);font-weight:550}
+.cd.l1{background:color-mix(in srgb,var(--accent) 16%,transparent)}
+.cd.l2{background:color-mix(in srgb,var(--accent) 32%,transparent)}
+.cd.l3{background:color-mix(in srgb,var(--accent) 52%,transparent)}
+.cd:not(:disabled):hover{outline:1px solid var(--accent)}
+.cd.today{box-shadow:inset 0 0 0 1.5px var(--line-2)}
+.cd.sel{background:var(--accent);color:#fff}
+.cd.has-live::after{content:"";position:absolute;top:3px;right:3px;width:5px;height:5px;border-radius:50%;background:var(--live)}
+.cal-foot{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:12px;color:var(--faint)}
+.link{color:var(--accent);font-size:12px}
+.link:hover{text-decoration:underline}
+
+/* streams */
+.streams{display:flex;flex-direction:column;gap:2px}
+.stream-btn{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:9px;text-align:left}
+.stream-btn:hover{background:var(--panel-2)}
+.stream-btn.on{background:var(--accent-soft);color:var(--accent)}
+.stream-btn .sw{width:8px;height:8px;border-radius:3px;flex:none}
+.stream-btn .n{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.stream-btn .c{color:var(--faint);font-size:12px;font-variant-numeric:tabular-nums}
+.stream-btn .lv{width:7px;height:7px;border-radius:50%;background:var(--live)}
+
+/* toolbar */
+.toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin-bottom:16px}
+.search{flex:1;min-width:200px;position:relative}
+.search svg{position:absolute;left:11px;top:50%;transform:translateY(-50%);color:var(--faint)}
+.search input{width:100%;height:38px;padding:0 12px 0 36px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--text);font:inherit}
+.search input:focus{outline:none;border-color:var(--accent)}
+.seg-ctl{display:inline-flex;padding:3px;border-radius:10px;background:var(--panel);border:1px solid var(--line)}
+.seg-ctl button{height:30px;padding:0 12px;border-radius:7px;color:var(--muted);font-size:13px}
+.seg-ctl button.on{background:var(--panel-2);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.2)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:30px;padding:0 6px 0 12px;border-radius:999px;background:var(--accent-soft);color:var(--accent);font-size:13px;font-weight:550}
+.chip button{width:20px;height:20px;border-radius:50%;display:grid;place-items:center}
+.chip button:hover{background:color-mix(in srgb,var(--accent) 25%,transparent)}
+
+.notice{padding:10px 14px;border-radius:10px;background:rgba(242,179,61,.12);color:var(--warn);font-size:13px;margin-bottom:14px}
+
+/* day groups */
+.day{margin-bottom:30px}
+.day-head{display:flex;align-items:flex-end;justify-content:space-between;gap:12px;margin-bottom:10px}
+.day-head h2{margin:0;font-size:18px;letter-spacing:-.01em}
+.day-head .sub{color:var(--muted);font-size:13px}
+.day-sum{color:var(--muted);font-size:13px;font-variant-numeric:tabular-nums;white-space:nowrap}
+
+.timeline{margin-bottom:14px}
+.track{position:relative;height:30px;border-radius:9px;background:var(--panel);border:1px solid var(--line);
+  background-image:repeating-linear-gradient(to right,var(--line) 0 1px,transparent 1px calc(100%/24));overflow:hidden}
+.track{cursor:pointer}
+.tl-seg{position:absolute;top:5px;bottom:5px;min-width:4px;border-radius:4px;background:var(--accent);opacity:.9;transition:transform .12s,opacity .12s}
+.tl-seg:hover{opacity:1;transform:scaleY(1.2)}
+.tl-seg.recording{background:var(--live);animation:blink 1.6s infinite}
+.tl-seg.flv{background:var(--warn)}
+.tl-mo{position:absolute;bottom:1px;height:3px;min-width:3px;border-radius:2px;background:var(--motion);pointer-events:none}
+.mo-tag{color:var(--motion) !important;background:color-mix(in srgb,var(--motion) 14%,transparent) !important;font-weight:600}
+.mo-sum{color:var(--motion);font-weight:600}
+.tl-mo.person,.scrub-segs .mo.person{background:var(--person)}
+.tl-mo.pet,.scrub-segs .mo.pet{background:var(--pet)}
+.mo-tag.person,.mo-sum.person{color:var(--person) !important;background:color-mix(in srgb,var(--person) 14%,transparent) !important}
+.mo-tag.pet,.mo-sum.pet{color:var(--pet) !important;background:color-mix(in srgb,var(--pet) 14%,transparent) !important}
+.mo-sum.person,.mo-sum.pet{background:none !important}
+/* People row: everyone seen, grouped by appearance (people.py) */
+.people{display:flex;gap:10px;overflow-x:auto;padding:2px 2px 10px;margin-bottom:6px;scrollbar-width:thin}
+.people:empty{display:none}
+.people .who{flex:none;display:flex;flex-direction:column;align-items:center;gap:4px;width:64px;padding:0;background:none;color:var(--muted);font-size:11.5px}
+.people .who i{position:relative;width:56px;height:56px;border-radius:50%;background:var(--panel-2);border:2px solid transparent;display:block}
+.people .who img{width:100%;height:100%;border-radius:50%;object-fit:cover;object-position:center 12%;display:block} /* head and shoulders */
+.people .who b{position:absolute;right:-2px;bottom:-2px;min-width:18px;height:18px;padding:0 4px;border-radius:9px;background:var(--panel);color:var(--text);font-size:10.5px;font-weight:650;line-height:18px;font-style:normal}
+.people .who span{max-width:64px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.people .who:hover i{border-color:var(--line)}
+.people .who.on i{border-color:var(--person)}
+.people .who.on span{color:var(--person);font-weight:650}
+.people .more{flex:none;align-self:flex-start;height:56px;padding:0 12px;border-radius:28px;background:var(--panel);border:1px solid var(--line);color:var(--muted);font-size:12px}
+.people.picking .who[disabled]{opacity:.28;cursor:default}
+.people.picking .who:not([disabled]) i{border-color:var(--line-2);border-style:dashed}
+.people.picking .who.on i{border-style:solid}
+.people.picking .who.sel i{border:2px solid var(--person)}
+.people.picking .who.sel i::after{content:"✓";position:absolute;left:-3px;top:-3px;width:18px;height:18px;border-radius:50%;background:var(--person);color:#fff;font-size:11px;font-weight:700;line-height:18px;text-align:center}
+/* bar under the People row for the picked person: "Same person as…" */
+.who-bar{display:flex;align-items:center;gap:8px 10px;flex-wrap:wrap;margin:0 0 12px;padding:8px 10px;border:1px solid var(--line);border-radius:10px;background:var(--panel);font-size:13px;color:var(--muted)}
+.who-bar[hidden]{display:none}
+.who-bar b{color:var(--text);font-weight:650}
+.who-bar img{width:30px;height:30px;border-radius:50%;object-fit:cover;object-position:center 12%;background:var(--panel-2);flex:none}
+.who-bar .pair{display:flex;align-items:center;gap:4px}
+.who-bar .sp{flex:1 1 200px;min-width:0}
+.who-bar button{height:30px;padding:0 12px;border-radius:8px;border:1px solid var(--line);background:var(--panel-2);color:var(--text);font-size:12.5px;font-weight:550;white-space:nowrap}
+.who-bar button.primary{background:var(--person);border-color:var(--person);color:#fff}
+.who-bar button:disabled{opacity:.5;cursor:default}
+.who-bar input{flex:1;min-width:120px;height:30px;padding:0 10px;border-radius:8px;border:1px solid var(--line-2);background:var(--bg);color:var(--text);font:inherit;font-size:13px}
+.people .ph-title{flex:none;align-self:center;writing-mode:vertical-rl;transform:rotate(180deg);color:var(--faint);font-size:10.5px;letter-spacing:.08em;text-transform:uppercase}
+#objF button[data-v="motion"].on{color:var(--motion)}
+#objF button[data-v="person"].on{color:var(--person)}
+#objF button[data-v="pet"].on{color:var(--pet)}
+/* event bar under the time bar: big previous / next, what to jump between, where we are */
+.evbar{--k:#ffd43b;display:flex;align-items:center;gap:10px;margin-top:10px}
+.evbar.person{--k:var(--person)} .evbar.pet{--k:var(--pet)}
+.evbar[hidden]{display:none}
+.evbtn{flex:none;display:inline-flex;align-items:center;justify-content:center;gap:6px;height:42px;min-width:48px;padding:0 16px;border-radius:12px;background:color-mix(in srgb,var(--k) 16%,transparent);color:var(--k);font-size:14px;font-weight:650}
+.evbtn:hover{background:color-mix(in srgb,var(--k) 28%,transparent)}
+.evbtn:active{transform:scale(.97)}
+.evmid{flex:1;min-width:0;display:flex;align-items:center;justify-content:center;gap:12px;flex-wrap:wrap}
+.evkinds{display:inline-flex;padding:3px;gap:2px;border-radius:11px;background:rgba(255,255,255,.06)}
+.evkinds button{height:32px;padding:0 12px;border-radius:8px;color:#8b97a7;font-size:12.5px;font-weight:600;white-space:nowrap;font-variant-numeric:tabular-nums}
+.evkinds button:hover{color:#dfe5ec}
+.evkinds button b{font-weight:700;margin-left:4px}
+.evkinds button.on{background:rgba(255,255,255,.1);color:var(--c)}
+.evkinds [data-k=motion]{--c:#ffd43b} .evkinds [data-k=person]{--c:var(--person)} .evkinds [data-k=pet]{--c:var(--pet)}
+.evpos{color:#8b97a7;font-size:12.5px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.evpos b{color:#fff;font-weight:650}
+#motionOnly[aria-pressed="true"]{background:color-mix(in srgb,var(--motion) 16%,transparent);border-color:var(--motion);color:var(--motion)}
+@keyframes blink{50%{opacity:.55}}
+.now-line{position:absolute;top:0;bottom:0;width:2px;background:var(--live);opacity:.7}
+.ticks{position:relative;height:16px;margin-top:3px}
+.ticks span{position:absolute;transform:translateX(-50%);font-size:10.5px;color:var(--faint);font-variant-numeric:tabular-nums}
+.ticks span:first-child{transform:none}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:14px}
+.card{display:flex;flex-direction:column;text-align:left;background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden;transition:transform .15s,border-color .15s,box-shadow .15s}
+@media (hover:hover){.card:hover{transform:translateY(-2px);border-color:var(--line-2);box-shadow:var(--shadow)}}
+.card:active{transform:scale(.985)}
+.thumb{position:relative;aspect-ratio:16/9;background:var(--panel-2);overflow:hidden}
+.thumb img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.thumb .ph{position:absolute;inset:0;display:grid;place-items:center;color:var(--faint)}
+.thumb .dur{position:absolute;right:8px;bottom:8px;padding:2px 7px;border-radius:6px;background:rgba(0,0,0,.72);color:#fff;font-size:12px;font-weight:600;font-variant-numeric:tabular-nums}
+.thumb .badge{position:absolute;left:8px;top:8px;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;letter-spacing:.03em;color:#fff}
+.badge.live{background:var(--live)}
+.badge.warn{background:var(--warn);color:#1a1300}
+.thumb .play{position:absolute;inset:0;display:grid;place-items:center;opacity:0;transition:opacity .15s;background:rgba(0,0,0,.25)}
+.thumb .play i{width:50px;height:50px;border-radius:50%;background:rgba(255,255,255,.95);color:#111;display:grid;place-items:center}
+@media (hover:hover){.card:hover .play{opacity:1}}
+.card .body{padding:11px 13px 13px}
+.card .title{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.card .when{color:var(--muted);font-size:13px;margin-top:1px;font-variant-numeric:tabular-nums}
+.tags{display:flex;flex-wrap:wrap;gap:5px;margin-top:9px}
+.tags span{font-size:11.5px;padding:2px 7px;border-radius:6px;background:var(--panel-2);color:var(--muted);font-variant-numeric:tabular-nums}
+
+.empty{padding:70px 20px;text-align:center;color:var(--muted);background:var(--panel);border:1px dashed var(--line-2);border-radius:var(--radius)}
+.empty b{display:block;color:var(--text);font-size:16px;margin-bottom:4px}
+.skeleton{height:220px;border-radius:var(--radius);background:linear-gradient(90deg,var(--panel) 0%,var(--panel-2) 50%,var(--panel) 100%);background-size:200% 100%;animation:sh 1.3s infinite}
+@keyframes sh{to{background-position:-200% 0}}
+
+/* ---------- player modal ---------- */
+.modal{position:fixed;inset:0;z-index:50;display:none;background:#000}
+.modal.open{display:block}
+.mcard{height:100vh;height:100dvh;display:flex;flex-direction:column;overflow-y:auto;background:var(--panel)}
+.stage{position:relative;flex:none;background:#000;display:flex;flex-direction:column;min-width:0}
+#freeze{position:absolute;object-fit:contain;background:#000;pointer-events:none} /* last frame while the next file loads */
+.vwrap{position:relative;width:100%;min-width:0}
+#hdVideo{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000} /* HD, over the (empty) SD video */
+/* zoom (double-tap): the videos are scaled inside the frame */
+.vwrap{overflow:hidden}
+.vwrap video{transform-origin:0 0;touch-action:pan-y}
+.vwrap.zoomed video{touch-action:none;cursor:grab}
+.zoom-pill{position:absolute;left:10px;bottom:10px;padding:6px 11px;border-radius:7px;border:0;background:rgba(0,0,0,.6);
+  backdrop-filter:blur(4px);color:#fff;font:600 12px/1 inherit;cursor:pointer}
+.zoom-pill[hidden]{display:none}
+/* live sound on / off: a round speaker button like the browser's own (the live picture has no sound track of its own, so the video's volume button can't be used) */
+.sound-pill{position:absolute;right:10px;bottom:56px;width:40px;height:40px;display:grid;place-items:center;padding:0;border-radius:50%;border:0;background:rgba(0,0,0,.55);
+  backdrop-filter:blur(4px);color:#fff;cursor:pointer}
+.sound-pill svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sound-pill.tap{animation:soundtap 1.4s ease-in-out infinite}
+@keyframes soundtap{50%{box-shadow:0 0 0 6px rgba(255,255,255,.22)}}
+@media (prefers-reduced-motion:reduce){.sound-pill.tap{animation:none}}
+.sound-pill[hidden]{display:none}
+.vbtn.hd{width:auto;padding:0 9px;font:700 12px/1 inherit;letter-spacing:.03em;border:1.5px solid currentColor;height:26px;border-radius:7px;align-self:center}
+.vbtn.hd{background:var(--accent);border-color:var(--accent);color:#fff;cursor:default} /* a tag: this camera plays in HD */
+.vwrap:fullscreen{display:flex;align-items:center;background:#000}
+.vwrap:fullscreen video{max-height:100vh;height:100%}
+/* on the picture while watching live (top right: the cameras put their clock top left) */
+.live-badge{position:absolute;top:10px;right:10px;display:flex;align-items:center;gap:7px;padding:5px 10px 5px 9px;border-radius:7px;
+  background:rgba(0,0,0,.55);backdrop-filter:blur(4px);color:#fff;font-size:12px;letter-spacing:.04em;pointer-events:none}
+.live-badge b{color:#ff6b78;font-weight:750}
+.live-badge span{color:#dfe5ec;font-weight:550;letter-spacing:0}
+.live-badge span:empty{display:none}
+.live-badge[hidden]{display:none}
+.vwrap{display:flex;justify-content:center}
+/* as big as fits with the bar, time bar and dock on screen (never below 45% of it) */
+.stage video{width:100%;max-height:max(45vh,calc(100vh - 290px));max-height:max(45dvh,calc(100dvh - 290px));aspect-ratio:16/9;background:#000;display:block}
+.scrub{width:100%;max-width:1600px;margin:0 auto}
+.nope{padding:40px;text-align:center;color:#c9d1db;max-width:420px;margin:auto}
+/* player time bar (always on the black stage, so fixed light-on-dark colours) */
+.scrub{flex:none;padding:10px 16px 12px;color:#8b97a7;user-select:none;-webkit-user-select:none}
+.scrub-head{display:flex;justify-content:space-between;gap:10px;font-size:12px;margin-bottom:6px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.scrub-head b{color:#fff;font-weight:600;font-size:13px}
+.scrub-head .gap{color:#f2b33d}
+.scrub-head span:last-child{overflow:hidden;text-overflow:ellipsis}
+.scrub-track{position:relative;height:36px;border-radius:8px;background-color:#11151b;cursor:pointer;touch-action:none}
+.scrub-segs{position:absolute;inset:0;overflow:hidden;border-radius:8px}
+.scrub-segs .sg{position:absolute;top:8px;bottom:8px;min-width:3px;border-radius:4px;background:var(--accent);opacity:.5;box-shadow:0 0 0 1px #11151b}
+.scrub-segs .sg.cur{opacity:1}
+.scrub-segs .sg.recording{background:var(--live)}
+.scrub-segs .sg.flv,.scrub-segs .sg.processing{background:var(--warn)}
+.scrub-segs .car{position:absolute;top:2px;height:4px;border-radius:2px;pointer-events:none;background:#37b24d}
+.scrub-segs .car.off{background:rgba(255,107,107,.45)}
+.scrub-segs.hdmode .sg{display:none} /* HD cameras: the bar shows where there's HD instead */
+.hd-none{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
+  padding:24px;text-align:center;color:#c9d1db;font-size:13px;line-height:1.45;pointer-events:none}
+.hd-none b{color:#fff;font-size:15px}
+.hd-none[hidden]{display:none}
+.scrub-segs .hd{position:absolute;top:8px;bottom:8px;min-width:2px;background:var(--accent);box-shadow:inset 1px 0 0 rgba(0,0,0,.45);pointer-events:none} /* one per file: a thin line where one starts */
+.scrub-segs .hd.rec{background:var(--live)} /* still being recorded */
+.scrub-segs .mo{position:absolute;bottom:2px;height:4px;min-width:3px;border-radius:2px;background:#ffd43b;pointer-events:none}
+#scrubDay{flex:1;min-width:0;text-align:right}
+.golive{height:22px;padding:0 8px;border-radius:6px;background:rgba(255,77,94,.2);color:#ff6b78;font-size:11.5px;font-weight:700;letter-spacing:.02em}
+.golive:hover{background:rgba(255,77,94,.32)}
+.scrub-ph{position:absolute;top:-3px;bottom:-3px;width:2px;margin-left:-1px;background:#fff;border-radius:2px;box-shadow:0 0 0 1px rgba(0,0,0,.45);touch-action:none;cursor:ew-resize}
+.scrub-ph::after{content:"";position:absolute;top:-10px;bottom:-6px;left:-14px;right:-14px} /* bigger grab area for the knob */
+.scrub-scroll{overflow-x:auto;overflow-y:hidden;padding-top:8px;margin-top:-8px;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.22) transparent;overscroll-behavior-x:contain}
+.scrub-scroll::-webkit-scrollbar{height:4px}
+.scrub-scroll::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22);border-radius:2px}
+.scrub-inner{min-width:100%}
+.scrub-scroll.zoomed .scrub-track{touch-action:pan-x} /* zoomed: swipe scrolls, tap jumps, drag the knob to scrub */
+.zoom{display:inline-flex;align-items:center;gap:2px;flex:none;padding:2px;border-radius:9px;background:rgba(255,255,255,.06)}
+.zoom button{height:24px;padding:0 9px;border-radius:7px;color:#8b97a7;font-size:11.5px;font-weight:650;font-variant-numeric:tabular-nums}
+.zoom button:hover:not(:disabled){color:#fff}
+.zoom button.on{background:rgba(255,255,255,.14);color:#fff}
+.zoom button:disabled{opacity:.3;cursor:default}
+.scrub-ph::before{content:"";position:absolute;top:-4px;left:50%;width:12px;height:12px;margin-left:-6px;border-radius:50%;background:#fff;box-shadow:0 1px 4px rgba(0,0,0,.5);transition:transform .12s}
+.scrub-track.dragging .scrub-ph::before{transform:scale(1.35)}
+.scrub-ticks{position:relative;height:14px;margin-top:5px;font-size:10.5px;color:#5d6978;font-variant-numeric:tabular-nums}
+.scrub-ticks span{position:absolute;transform:translateX(-50%)}
+.scrub-ticks span.start{transform:none}
+.scrub-ticks span.end{transform:translateX(-100%)}
+.nope b{display:block;color:#fff;font-size:17px;margin-bottom:6px}
+
+/* recording view: a page of its own. Bar, picture, time bar, then speed and people */
+.vbar{flex:none;display:flex;align-items:center;gap:14px;padding:10px 16px;padding-top:max(10px,env(safe-area-inset-top));background:var(--panel);border-bottom:1px solid var(--line)}
+.vback{flex:none;display:inline-flex;align-items:center;gap:4px;height:36px;padding:0 12px 0 6px;border-radius:10px;color:var(--muted);font-size:13.5px;font-weight:600}
+.vback:hover{background:var(--panel-2);color:var(--text)}
+.vtitle{min-width:0;flex:0 1 auto}
+.vtitle h3{margin:0;font-size:16px;font-weight:700;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vtitle .sub{color:var(--muted);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.daynav{flex:none;display:flex;align-items:center;gap:2px;margin:0 auto;padding:3px;border-radius:12px;background:var(--panel-2);border:1px solid var(--line)}
+.daynav button{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 10px;border-radius:9px;color:var(--muted);font-size:12.5px;font-weight:600;max-width:150px}
+.daynav button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.daynav button:hover:not(:disabled){background:var(--panel);color:var(--text)}
+.daynav button:disabled{opacity:.35}
+.daynav b{min-width:110px;padding:0 8px;text-align:center;font-size:13px;font-weight:700;white-space:nowrap}
+.vacts{flex:none;display:flex;align-items:center;gap:4px}
+.vbtn{display:inline-grid;place-items:center;width:36px;height:36px;border-radius:10px;color:var(--muted);text-decoration:none}
+.vbtn:hover{background:var(--panel-2);color:var(--text)}
+.kbd-help{cursor:help}
+.dock{flex:1 0 auto;display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px 28px;align-items:start;align-content:start;padding:14px 20px 18px;padding-bottom:max(18px,env(safe-area-inset-bottom));background:var(--panel);border-top:1px solid var(--line)}
+
+.dock-sec{min-width:0}
+.dock-sec[hidden],.sec[hidden]{display:none}
+.dock .lbl{font-size:11px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+.dock .lbl .count{text-transform:none;letter-spacing:0}
+.dock .lbl .hint{margin-left:6px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--faint)}
+.speeds{display:inline-flex;padding:3px;gap:2px;border-radius:11px;background:var(--panel-2);border:1px solid var(--line)}
+.speeds button{height:30px;min-width:40px;padding:0 8px;border-radius:8px;color:var(--muted);font-size:12.5px;font-weight:600;font-variant-numeric:tabular-nums}
+.speeds button:hover{color:var(--text)}
+.speeds button.on{background:var(--accent);color:#fff}
+.dock .people{margin:0;padding-bottom:4px}
+.dock .who-bar{grid-column:1/-1;margin:0}
+#peopleSec:has(.people:empty){display:none}
+
+.toast{position:fixed;left:50%;bottom:24px;transform:translate(-50%,20px);opacity:0;z-index:60;padding:10px 16px;border-radius:10px;background:var(--text);color:var(--bg);font-size:13px;font-weight:550;transition:.2s;pointer-events:none}
+.toast.on{opacity:1;transform:translate(-50%,0)}
+
+/* ---------- responsive ---------- */
+@media (max-width:1000px){
+  .layout{grid-template-columns:minmax(0,1fr)}
+  aside{position:static;display:grid;grid-template-columns:1fr 1fr}
+}
+@media (max-width:640px){
+  .top{padding:10px 16px}
+  .wrap{padding:16px 16px 40px}
+  .updated{display:none}
+  .brand{font-size:15px}
+  #refresh span{display:none}
+  .stats{grid-template-columns:1fr 1fr}
+  aside{grid-template-columns:1fr}
+  .ticks .minor{display:none}
+  .modal{padding:0}
+  .mcard{border-radius:0;height:100%;border:0}
+  .day-head{flex-direction:column;align-items:flex-start;gap:2px}
+}
+
+/* ---------- mobile ---------- */
+.tb-row{display:flex;align-items:center;gap:10px}
+.m-only{display:none !important}
+.m-streams{gap:6px;overflow-x:auto;margin:0 -16px 14px;padding:2px 16px;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.m-streams::-webkit-scrollbar,.tb-row::-webkit-scrollbar,.stats::-webkit-scrollbar{display:none}
+.m-streams button{flex:none;display:inline-flex;align-items:center;gap:7px;height:34px;padding:0 13px;border-radius:999px;border:1px solid var(--line);background:var(--panel);font-size:13px;white-space:nowrap}
+.m-streams button .sw{width:8px;height:8px;border-radius:3px}
+.m-streams button .c{color:var(--faint);font-size:12px}
+.m-streams button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.m-streams button.on .c{color:rgba(255,255,255,.8)}
+.m-streams button .lv{width:7px;height:7px;border-radius:50%;background:var(--live)}
+
+@media (max-width:640px){
+  body{font-size:14.5px}
+  .m-only{display:flex !important}
+  .top{padding:10px 16px;padding-top:max(10px,env(safe-area-inset-top))}
+  .wrap{padding:14px 16px calc(40px + env(safe-area-inset-bottom))}
+
+  /* stats: swipeable row */
+  .stats{display:flex;overflow-x:auto;gap:10px;margin:0 -16px 16px;padding:0 16px;scroll-snap-type:x mandatory;scroll-padding-inline:16px;scrollbar-width:none}
+  .stat{flex:0 0 44%;scroll-snap-align:start;padding:11px 13px}
+  .stat .k{font-size:11px}
+  .stat .v{font-size:19px}
+
+  /* sidebar -> calendar drawer, streams -> chip row */
+  aside{display:none;position:static;margin-bottom:14px}
+  body.cal-open aside{display:block}
+  aside .box + .box{display:none}
+  .cd{font-size:14px;aspect-ratio:auto;height:40px}
+
+  /* toolbar */
+  .toolbar{gap:8px;margin-bottom:10px}
+  .search{flex:1 1 100%;min-width:0}
+  .search input{height:44px;font-size:16px;border-radius:12px}
+  .tb-row{flex:1 1 100%;overflow-x:auto;margin:0 -16px;padding:2px 16px;scrollbar-width:none}
+  .tb-row > *{flex:none}
+  .tb-row .icon-btn{height:38px;border-radius:10px}
+  body.cal-open #calToggle{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  .seg-ctl button{height:32px;padding:0 12px}
+  #dayChip:empty{display:none}
+
+  /* day groups */
+  .day{margin-bottom:24px}
+  .day-head h2{font-size:17px}
+  .timeline{margin-bottom:12px}
+  .tl-scroll{display:flex;overflow-x:auto;margin:0 -16px;padding-left:16px;scrollbar-width:none;-webkit-overflow-scrolling:touch;overscroll-behavior-x:contain}
+  .tl-scroll::-webkit-scrollbar{display:none}
+  .tl-scroll::after{content:"";flex:none;width:16px}
+  .tl-inner{flex:none}
+  .track{height:40px;border-radius:10px}
+  .tl-seg{top:6px;bottom:6px;min-width:10px;border-radius:5px;box-shadow:0 0 0 1px var(--panel)}
+  .tl-seg:hover{transform:none}
+  .tl-seg:active{opacity:1;transform:scaleY(1.15)}
+  .ticks{height:18px;margin-top:4px}
+  .ticks span{font-size:11px}
+  .ticks span.end{transform:translateX(-100%)}
+
+  /* cards -> compact list rows */
+  .grid{grid-template-columns:1fr;gap:10px}
+  .card{flex-direction:row;align-items:stretch;border-radius:12px}
+  .thumb{width:38%;max-width:170px;flex:none;aspect-ratio:16/10}
+  .thumb .dur{right:5px;bottom:5px;font-size:11px;padding:1px 6px}
+  .thumb .badge{left:5px;top:5px;font-size:10px;padding:2px 6px}
+  .thumb .ph svg{width:26px;height:26px}
+  .card .body{flex:1;min-width:0;padding:9px 11px;display:flex;flex-direction:column;justify-content:center}
+  .card .when{font-size:12.5px}
+  .tags{margin-top:6px}
+  .tags span{font-size:11px;padding:1px 6px}
+
+  /* recording view on a phone: bar on one row, day buttons under it; the page scrolls */
+  .vbar{flex-wrap:wrap;gap:6px 8px;padding:8px 10px}
+  .vback span{display:none}
+  .vback{padding:0 6px}
+  .vtitle{flex:1}
+  .daynav{order:3;flex:1 0 100%;justify-content:space-between}
+  .daynav b{min-width:0}
+  .stage video{max-height:none}
+  .scrub{padding:10px 14px 12px}
+  .scrub-track{height:42px}
+  #scrubDay{display:none}
+  .scrub-head{gap:6px}
+  .zoom{margin-left:auto}
+  .zoom button{padding:0 7px}
+  .evbar{gap:8px}
+  .evbtn{padding:0;width:52px;height:48px}
+  .evbtn span{display:none}
+  .evmid{flex-direction:column;gap:4px}
+  .evkinds button{padding:0 9px}
+  .scrub-segs .sg{top:10px;bottom:10px}
+  .nope{padding:28px 20px}
+  .dock{grid-template-columns:minmax(0,1fr);padding:14px 14px 18px}
+  .dock .lbl .hint{display:none}
+  .speeds{display:grid;grid-template-columns:repeat(8,1fr);width:100%}
+  .speeds button{min-width:0;padding:0}
+}
+@media (hover:none){ .kbd-help{display:none} }
+
+/* home: one tile per camera, live or offline */
+.home{min-height:100vh;min-height:100dvh;display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,420px),1fr));align-content:center;gap:16px;padding:16px;max-width:1600px;margin:0 auto}
+.tile{position:relative;display:block;width:100%;aspect-ratio:16/9;padding:0;border:1px solid var(--line);border-radius:14px;overflow:hidden;background:#000;cursor:pointer;color:#fff;text-align:left}
+.tile video,.tile img{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block}
+.tile img{opacity:.35;filter:grayscale(1)}
+.tile .st{position:absolute;top:12px;left:12px;display:flex;align-items:center;gap:7px;padding:5px 10px;border-radius:8px;background:rgba(0,0,0,.6);font-size:12px;font-weight:700;letter-spacing:.04em}
+.tile .st i{width:8px;height:8px;border-radius:50%;background:#8b949e}
+.tile.live .st{color:#ff6b78}
+.tile.live .st i{background:#ff4d5e;animation:pulse 1.6s infinite}
+.tile .nm{position:absolute;left:12px;bottom:12px;padding:4px 10px;border-radius:8px;background:rgba(0,0,0,.6);font-size:15px;font-weight:650}
+.tile .ago{position:absolute;right:12px;bottom:12px;padding:4px 10px;border-radius:8px;background:rgba(0,0,0,.6);font-size:12px;color:#c9d1d9}
+.tile .ago:empty{display:none}
+.tile .hdt{position:absolute;top:12px;right:12px;padding:5px 9px;border-radius:7px;background:var(--accent);color:#fff;font-size:12px;font-weight:700;letter-spacing:.03em}
+.tile .hdt[hidden]{display:none}
+@media (hover:hover){.tile:hover{border-color:var(--line-2);box-shadow:var(--shadow)}}
+.home .skeleton{grid-column:1/-1}
+
+/* ===== camera page theme: header, day row, picture badge, unified time bar, jump section ===== */
+.vbar{flex-wrap:nowrap;gap:8px;padding:8px 12px;padding-top:max(8px,env(safe-area-inset-top));border-bottom:0}
+.vback{width:40px;height:40px;padding:0;justify-content:center;border-radius:10px}
+.vback span{display:none}
+.vtitle{flex:1 1 auto}
+.vtitle h3{font-size:15px}
+.vtitle .sub{font-size:11.5px}
+.vacts{gap:6px}
+.vbtn{width:40px;height:40px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line)}
+.vbtn.hd{width:auto;height:28px;padding:0 10px;border:0;border-radius:8px;font-size:12px}
+.live-badge{gap:7px;padding:4px 10px 4px 9px;font-weight:600;letter-spacing:0;font-variant-numeric:tabular-nums}
+.live-badge .bdot{width:8px;height:8px;border-radius:50%;background:var(--live);animation:pulse 1.4s infinite}
+.live-badge b{color:#fff;font-weight:650}
+.live-badge.rec .bdot{border-radius:2px;background:#f2b33d;animation:none}
+.live-badge.rec b{color:#f2b33d}
+.live-badge span{color:#fff;font-weight:500}
+.scrub{padding:12px 12px 6px}
+.scrub-head{justify-content:flex-start;align-items:center;gap:8px;margin-bottom:10px}
+.scrub-head b{font-size:17px;font-weight:650;color:#fff}
+.golive{height:30px;padding:0 11px;border-radius:9px;background:#1a2029;border:1px solid #252d38;color:#ff6b78;font-size:12px}
+.scrub-head .zoom{margin-left:auto;overflow:visible;background:#14181f}
+.zoom button{height:32px;padding:0 10px;font-size:12px}
+.zoom button.on{background:#252d38}
+.ubar{display:grid;grid-template-columns:22px minmax(0,1fr);background:#14181f;border-radius:12px;padding:8px 10px 6px 4px}
+.ugut{position:relative;height:52px;color:#5d6978}
+.ugut svg{position:absolute;left:3px;width:16px;height:16px}
+.ugut svg:nth-child(1){top:2px}.ugut svg:nth-child(2){top:23px}.ugut svg:nth-child(3){top:37px}
+.scrub-track{height:52px;background-color:transparent;border-radius:0}
+.scrub-segs{overflow:visible;border-radius:0}
+.scrub-segs .sg{top:24px;bottom:auto;height:14px;border-radius:3px;min-width:2px}
+.scrub-segs .hd{top:24px;bottom:auto;height:14px;border-radius:3px}
+.scrub-segs .car{top:42px;height:6px;border-radius:3px}
+.scrub-segs .ev{position:absolute;top:0;height:20px;transform:translateX(-50%);display:flex;align-items:center;gap:1px;pointer-events:none;white-space:nowrap}
+.ev svg{width:15px;height:15px}
+.ev .pe{color:var(--person)} .ev .pw{color:var(--pet)}
+.ev circle[r="1.2"]{fill:currentColor}
+.ev sup{margin-left:1px;font-size:10.5px;font-weight:600;line-height:1;color:#c9d1db}
+.scrub-ticks{height:16px;margin-top:6px;font-size:11px;color:#8b97a7}
+.carline{display:flex;align-items:center;gap:6px;margin:8px 2px 0;color:#8b97a7;font-size:12px}
+.carline:empty{display:none}
+.dock{display:flex;flex-direction:column;gap:12px;padding:12px 12px max(18px,env(safe-area-inset-bottom));background:var(--bg);border-top:0}
+.dock>*{width:100%;max-width:1100px;margin-inline:auto}
+.sec{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px}
+.dock .lbl{font-size:13px;font-weight:500;letter-spacing:0;text-transform:none;color:var(--muted);margin-bottom:8px}
+.jhead{display:flex;align-items:center;justify-content:flex-start;gap:8px;margin-bottom:8px}
+.jhead:has(#moKinds:empty){display:none}
+.jl{color:var(--muted);font-size:13px}
+.jump:has(#moKinds:empty):has(.people:empty){display:none}
+.evkinds{padding:0;gap:6px;background:none}
+.evkinds button{height:34px;padding:0 12px;border-radius:10px;background:var(--panel-2);border:1px solid var(--line);color:var(--muted);font-size:13px}
+.evkinds button.on{background:color-mix(in srgb,var(--c) 16%,var(--panel-2));border-color:var(--c);color:var(--c)}
+.people .who{width:60px}
+.people .who i{width:48px;height:48px}
+.evbar{margin-top:6px;gap:10px}
+.evbtn{width:52px;height:46px;padding:0;border-radius:12px}
+.evpos{color:var(--muted);font-size:13px}
+.evpos b{color:var(--text)}
+@media (min-width:900px){.scrub-ticks{font-size:11.5px}}
+
+/* ===== the picture: rounded, with its own buttons (play, speed, sound, full screen) ===== */
+.stage{background:var(--bg-dark,#0c0f13);padding-top:10px}
+.vwrap{margin:0 12px;width:auto;border-radius:10px}
+.vwrap:fullscreen{margin:0;border-radius:0}
+.live-badge{left:8px;right:auto;top:8px;border-radius:8px;background:rgba(0,0,0,.45)}
+.vclock{position:absolute;right:8px;top:8px;padding:4px 9px;border-radius:8px;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);color:#fff;font-size:12px;font-weight:500;font-variant-numeric:tabular-nums;pointer-events:none}
+.vclock[hidden]{display:none}
+.vctl{position:absolute;bottom:8px;display:flex;align-items:center;gap:6px}
+.vctl-l{left:8px}.vctl-r{right:8px}
+.vc{display:inline-grid;place-items:center;min-width:36px;height:36px;padding:0 9px;border:0;border-radius:9px;background:rgba(0,0,0,.45);backdrop-filter:blur(4px);color:#fff;font:600 13px/1 inherit;cursor:pointer}
+.vc svg{width:20px;height:20px}
+.vc[hidden]{display:none}
+.vctl .sound-pill{position:static;width:auto;height:36px;border-radius:9px}
+.vctl .sound-pill svg{width:20px;height:20px}
+.zoom-pill{left:50%;transform:translateX(-50%)}
+
+.vbar{position:relative}
+.calpop{position:absolute;right:12px;top:calc(100% - 4px);z-index:20;width:290px;padding:12px;border-radius:14px;background:var(--panel);border:1px solid var(--line-2,var(--line));box-shadow:0 12px 32px rgba(0,0,0,.5)}
+.calpop[hidden]{display:none}
+.calhead{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;font-size:14px}
+.calhead button{width:36px;height:36px;border-radius:10px;color:var(--text);font-size:20px}
+.calhead button:disabled{opacity:.3}
+.calgrid{display:grid;grid-template-columns:repeat(7,1fr);gap:2px;text-align:center}
+.calgrid span{color:var(--muted);font-size:11px;padding:4px 0}
+.calgrid button{height:36px;border-radius:9px;color:var(--text);font-size:13.5px;font-variant-numeric:tabular-nums}
+.calgrid button:disabled{color:var(--faint);opacity:.4;cursor:default}
+.calgrid button:not(:disabled):hover{background:var(--panel-2)}
+.calgrid button.tod{box-shadow:inset 0 0 0 1px var(--line-2,var(--line))}
+.calgrid button.sel{background:var(--accent);color:#fff}
+.jhead{display:none !important}
+.jump:has(.people:empty){display:none}
+.vclock,.live-badge,.vctl{transition:opacity .35s}
+.vwrap.idle .vclock,.vwrap.idle .vctl{opacity:0;pointer-events:none}
+@media (prefers-reduced-motion:reduce){.vclock,.live-badge,.vctl{transition:none}}
+
+/* ===== sign-in ===== */
+.login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:var(--bg,#0c0f13);padding:24px}
+.login[hidden]{display:none}
+.login-card{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%;max-width:340px;text-align:center}
+.login-card[hidden]{display:none}
+.login-card h1{margin:6px 0 0;font-size:22px;font-weight:700;letter-spacing:-.01em}
+.login-card p{margin:0 0 14px;color:var(--muted)}
+.gbtn{display:inline-flex;align-items:center;justify-content:center;gap:12px;width:100%;height:48px;border-radius:12px;background:#fff;color:#1f1f1f;font-size:15px;font-weight:600;border:1px solid #dadce0;cursor:pointer}
+.gbtn:disabled{opacity:.6;cursor:default}
+.login-err{min-height:18px;color:var(--live);font-size:13px}
+.acct{position:fixed;top:max(12px,env(safe-area-inset-top));right:12px;z-index:30;width:36px;height:36px;padding:0;border-radius:50%;border:1px solid var(--line);background:var(--panel-2) center/cover no-repeat;color:var(--text);font-weight:700;cursor:pointer}
+.acct[hidden],.modal.open ~ .acct{display:none}
+</style>
+</head>
+<body>
+
+<main class="home" id="home" aria-label="Cameras"><div class="skeleton"></div></main>
+
+<div class="modal" id="modal" aria-hidden="true">
+  <div class="mcard" role="dialog" aria-modal="true" aria-labelledby="pTitle">
+    <header class="vbar">
+      <button class="vback" id="pClose" aria-label="Back to cameras" title="Back to cameras (Esc)"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg><span>Cameras</span></button>
+      <div class="vtitle"><h3 id="pTitle"></h3><div class="sub" id="pSub"></div></div>
+      <div class="vacts">
+        <button class="vbtn" id="pCal" aria-haspopup="true" aria-expanded="false" title="Pick a day" aria-label="Pick a day"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M16 3v4M8 3v4M3 11h18"/></svg></button>
+        <div class="calpop" id="calPop" hidden></div>
+        <button class="vbtn hd" id="pHD" hidden title="HD: the camera's full 2304×1296 picture">HD</button>
+        <a class="vbtn" id="pDownload" download title="Download this recording" aria-label="Download"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M5 21h14"/></svg></a>
+        <button class="vbtn" id="pCopy" title="Copy a link to this recording" aria-label="Copy link"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 14a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"/><path d="M14 10a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"/></svg></button>
+        <span class="vbtn kbd-help" tabindex="0" aria-label="Keyboard shortcuts" title="Keyboard shortcuts
+Space  play / pause
+← →  back / forward 10 s
+M, Shift+M  next / previous person (or pet)
++ −  zoom the time bar
+[ ]  previous / next day
+P N  previous / next recording
+F  full screen
+Esc  back to cameras"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 10h.01M10 10h.01M14 10h.01M18 10h.01M7 14h10"/></svg></span>
+      </div>
+    </header>
+    <div class="stage">
+      <div class="vwrap" id="vwrap">
+        <video id="video" playsinline preload="metadata"></video>
+        <video id="hdVideo" playsinline preload="metadata" hidden></video>
+        <audio id="hdAudioEl" hidden></audio>
+        <div class="hd-none" id="hdNone" hidden></div>
+        <button class="zoom-pill" id="zoomPill" hidden title="Zoom out (or double-tap the picture)"></button>
+        <canvas id="freeze" hidden></canvas>
+        <div class="live-badge" id="liveBadge" hidden><i class="bdot"></i><b id="liveBadgeWord">Live</b></div>
+        <div class="vclock" id="vClock" hidden></div>
+        <div class="vctl vctl-l"><button class="vc" id="vPlay" type="button" aria-label="Play"></button></div>
+        <div class="vctl vctl-r">
+          <button class="vc" id="vSpeed" type="button" title="Playback speed">1×</button>
+          <button class="sound-pill vc" id="hdSound" type="button" hidden></button>
+          <button class="vc" id="vMute" type="button"></button>
+          <button class="vc" id="vFull" type="button" title="Full screen (F)" aria-label="Full screen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+        </div>
+      </div>
+      <div class="nope" id="nope" hidden></div>
+      <div class="scrub" id="scrub" hidden>
+        <div class="scrub-head"><span id="scrubTime"></span><button class="golive" id="goLive" hidden title="Switch to live">LIVE ›</button>
+          <span class="zoom" id="zoom" role="group" aria-label="Time bar scale" title="Or scroll / pinch on the bar to zoom"><button data-span="0">Day</button><button data-span="21600">6 h</button><button data-span="3600">1 h</button><button data-span="900">15 m</button></span></div>
+        <div class="ubar">
+          <div class="ugut" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="7" r="4"/><path d="M5.5 21v-2a4 4 0 0 1 4-4h5a4 4 0 0 1 4 4v2"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="12" height="12" rx="2"/><path d="M15 10l6-3v10l-6-3"/></svg>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17H3v-6l2-5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0H9"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>
+          </div>
+          <div class="scrub-scroll" id="scrubScroll"><div class="scrub-inner" id="scrubInner">
+            <div class="scrub-track" id="scrubTrack" aria-label="Time bar: tap to jump, drag to scrub, scroll or pinch to zoom"><div class="scrub-segs" id="scrubSegs"></div><span class="scrub-ph" id="scrubPh"></span></div>
+            <div class="scrub-ticks" id="scrubTicks"></div>
+          </div></div>
+        </div>
+        <div class="carline" id="scrubDay"></div>
+      </div>
+    </div>
+    <div class="dock">
+      <div class="sec jump" id="jumpSec">
+        <div class="jhead"><div class="evkinds" id="moKinds" role="group" aria-label="Jump between"></div></div>
+        <div class="dock-sec" id="peopleSec">
+          <div class="lbl">People<span class="count" id="peopleN"></span> <span class="hint">tap to show only their moments</span></div>
+          <div class="people" id="people" aria-label="People"></div>
+        </div>
+        <div class="evbar person" id="moNav" hidden>
+          <button class="evbtn" id="moPrev" title="Previous event (Shift+M)" aria-label="Previous"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"/></svg></button>
+          <div class="evmid"><span class="evpos" id="moPos"></span></div>
+          <button class="evbtn" id="moNext" title="Next event (M)" aria-label="Next"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"/></svg></button>
+        </div>
+      </div>
+      <div class="who-bar" id="whoBar" hidden></div>
+      <div class="sec dock-sec" id="speedSec" hidden>
+        <div class="lbl">Speed</div>
+        <div class="speeds" id="speeds" role="group" aria-label="Playback speed"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="login" id="login">
+  <div class="login-card" id="loginCard" hidden>
+    <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#ff4d5e"/><circle cx="12" cy="12" r="3.2" fill="#fff"/></svg>
+    <h1>Guttedar Nilaya</h1>
+    <p>Sign in to see the cameras.</p>
+    <button class="gbtn" id="gSignIn" type="button"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.7a14.5 14.5 0 010-9.4l-7.9-6.1a24 24 0 000 21.6l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.500 42.600 14.600 48 24 48z"/></svg>Sign in with Google</button>
+    <div class="login-err" id="loginErr" role="alert"></div>
+  </div>
+</div>
+<button class="acct" id="acct" hidden aria-label="Account"></button>
+
+<div class="toast" id="toast"></div>
+
+<script>
+/* ===== configuration ===== */
+// what each camera is called on screen (its stream name stays the key)
+const CAM_NAMES = { cam1: 'Guttedar Nilaya' };
+const camName = s => CAM_NAMES[s] || s;
+const CFG = {
+  streams:  '/recordings/streams.json', // written by recordings.py: the cameras; each has its own
+                                        // <stream>/index.json, people.json and live-dvr.json
+  fallback: '/api/files/',            // nginx autoindex JSON (used if index.json is missing)
+  base:     '/recordings/',           // where the video files are served
+  refreshMs: 60000,
+  hls:      '/hls/',                  // live HLS playlists: /hls/<stream>.m3u8
+  stat:     '/stat',                  // nginx-rtmp stats (who is live right now)
+  statMs:   15000,
+  // <stream>/live-dvr.json, written by live_dvr.py: rewindable copies of recordings in progress
+  liveDvrMs: 5000,
+  // <stream>/people.json, written by people.py: sightings grouped by person
+  peopleMin: 2,                          // people seen fewer times are behind "+ more"
+  peopleApi: '/api/people/',             // people_api.py: "same person" marks
+  hlsJs:    ['/assets/hls.min.js', 'https://cdn.jsdelivr.net/npm/hls.js@1/dist/hls.min.js'],
+};
+
+/* ===== helpers ===== */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pad = n => String(n).padStart(2, '0');
+const dayKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+const fromKey = k => { const [y, m, d] = k.split('-').map(Number); return new Date(y, m - 1, d); };
+const encPath = p => p.split('/').map(encodeURIComponent).join('/');
+const fileUrl = f => CFG.base + encPath(f);
+
+function fmtDur(s) {
+  if (!s) return '—';
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return h ? `${h}h ${pad(m)}m` : m ? `${m}m ${pad(sec)}s` : `${sec}s`;
+}
+function fmtClock(s) {
+  if (!s) return '—';
+  s = Math.round(s);
+  const h = Math.floor(s / 3600), m = Math.floor(s % 3600 / 60), sec = s % 60;
+  return h ? `${h}:${pad(m)}:${pad(sec)}` : `${m}:${pad(sec)}`;
+}
+function fmtSize(b) {
+  if (!b) return '—';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB']; let i = 0;
+  while (b >= 1024 && i < u.length - 1) { b /= 1024; i++; }
+  return `${b.toFixed(b >= 100 || i === 0 ? 0 : 1)} ${u[i]}`;
+}
+const fmtTime = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+const fmtTimeS = d => d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+const fmtDateLong = d => d.toLocaleDateString([], { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+const fmtDateShort = d => d.toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
+function relDay(d) {
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const diff = Math.round((t - d) / 864e5);
+  if (diff === 0) return 'Today';
+  if (diff === 1) return 'Yesterday';
+  if (diff > 1 && diff < 7) return d.toLocaleDateString([], { weekday: 'long' });
+  return d.toLocaleDateString([], { day: 'numeric', month: 'long' });
+}
+function ago(d) {
+  const s = (Date.now() - d) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  const days = Math.floor(s / 86400);
+  return days === 1 ? 'yesterday' : `${days} days ago`;
+}
+function resLabel(r) {
+  const h = r.height; if (!h) return '';
+  return h >= 2160 ? '4K' : h >= 1440 ? '1440p' : h >= 1080 ? '1080p' : h >= 720 ? '720p' : h >= 480 ? '480p' : `${h}p`;
+}
+const PALETTE = ['#4d8dff', '#35c28b', '#b57bff', '#ff8a4d', '#2ec5d3', '#f2b33d', '#ff6fa8', '#8fa0ff'];
+const colorMap = new Map();
+const streamColor = s => { if (!colorMap.has(s)) colorMap.set(s, PALETTE[colorMap.size % PALETTE.length]); return colorMap.get(s); };
+
+const NAME_RE = /^(.+?)(?:-(\d{9,11}))?_(\d{4})-(\d{2})-(\d{2})_(\d{2})-(\d{2})-(\d{2})$/;
+function parseName(file) {
+  const stem = file.replace(/\.[^.]+$/, '');
+  const m = stem.match(NAME_RE);
+  if (!m) return { stream: stem, start: null };
+  const start = m[2] ? +m[2] : Date.UTC(+m[3], m[4] - 1, +m[5], +m[6], +m[7], +m[8]) / 1000;
+  return { stream: m[1], start };
+}
+
+const ICON = {
+  play: '<svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>',
+  film: '<svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M10 9.5v5l4-2.5z" fill="currentColor"/></svg>',
+  close: '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"/></svg>',
+};
+
+/* ===== state ===== */
+let RAW = [], ALL = [], visible = [], source = 'index', loadedOnce = false;
+let LIVE = null; // Map(stream -> {ms}) from /stat, or null if /stat is unreachable
+let DVR = null, dvrText = ''; // live-dvr.json: {dvr: {recording file: {path, start}}}
+let PEOPLE = null;           // every camera's people.json, combined
+let STREAMS = [];            // streams.json: the cameras
+const streamUrl = (s, f) => `${CFG.base}${encodeURIComponent(s)}/${f}?t=${Date.now()}`;
+// one JSON file from every camera (null where it is missing)
+const perStream = f => Promise.all(STREAMS.map(s => fetch(streamUrl(s, f), { cache: 'no-store' })
+  .then(r => r.ok ? r.text() : null).catch(() => null)));
+let peopleAll = false;       // show people seen only once too
+let pick = null;             // "Same person as…": {from: id, to: [ids]} while choosing the others
+let pendingSame = [];        // marks made here that people.json doesn't include yet: [{a, b, mark, at}]
+let pendingNames = {};       // names given here that people.json doesn't show yet: {id: {name, at}}
+let pendingObjects = {};     // "not a person" marks people.json doesn't include yet: {id: at}
+let naming = false;          // the person bar shows the rename field
+const state = { q: '', stream: '', range: 'all', day: null, sort: 'desc', month: null, obj: '', who: '' }; // obj: '' | motion | person | pet; who: a person id
+let currentFile = null, speed = 1;
+
+/* ===== data ===== */
+function norm(r) {
+  const dur = +r.duration || 0;
+  const startD = new Date(r.start * 1000);
+  const status = r.status || 'ready';
+  return { ...r, status, dur, startD, endD: new Date((r.start + dur) * 1000), day: dayKey(startD),
+           playable: (status === 'ready' && /\.mp4$/i.test(r.file)) || status === 'recording' };
+}
+
+async function fetchLiveDvr() {
+  try {
+    const texts = await perStream('live-dvr.json'), text = texts.join('\n');
+    if (text === dvrText) return false;
+    dvrText = text;
+    DVR = { dvr: {} };
+    for (const t of texts) if (t) Object.assign(DVR.dvr, JSON.parse(t).dvr || {});
+    return true;
+  } catch { return false; }
+}
+
+async function fetchStat() {
+  try {
+    const r = await fetch(`${CFG.stat}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw 0;
+    const x = new DOMParser().parseFromString(await r.text(), 'text/xml');
+    const kid = (el, tag) => [...el.children].find(c => c.tagName === tag);
+    const m = new Map();
+    for (const st of x.getElementsByTagName('stream')) {
+      if (kid(st.parentElement?.parentElement || st, 'name')?.textContent === 'show') continue; // live_relay.py's copy
+      const name = kid(st, 'name')?.textContent;
+      if (name && st.getElementsByTagName('publishing').length) m.set(name, { ms: +(kid(st, 'time')?.textContent || 0) });
+    }
+    LIVE = m;
+  } catch { LIVE = null; }
+}
+
+async function fetchPeople() {
+  try {
+    const all = (await perStream('people.json')).filter(Boolean).map(t => JSON.parse(t));
+    PEOPLE = all.length ? { people: [], seen: {}, static: {}, learned: {}, marks: [] } : null;
+    for (const x of all) {
+      PEOPLE.people.push(...(x.people || []));
+      Object.assign(PEOPLE.seen, x.seen || {});
+      Object.assign(PEOPLE.static, x.static || {});
+      Object.assign(PEOPLE.learned, x.learned || {});
+      PEOPLE.marks.push(...(x.marks || []));
+      PEOPLE.objects = [...(PEOPLE.objects || []), ...(x.objects || [])];
+    }
+  } catch { PEOPLE = null; }
+  // until people.py has regrouped with them (a minute or two), show marks and names made
+  // here as done (a people.json from a run that started before them doesn't have them)
+  const now = Date.now() / 1000, stale = x => now - x.at > 900;
+  pendingSame = pendingSame.filter(m => PEOPLE && !(PEOPLE.marks || []).includes(m.mark) && !stale(m));
+  for (const [id, at] of Object.entries(pendingObjects)) {
+    if (!PEOPLE || PEOPLE.objects?.includes(id) || stale({ at })) delete pendingObjects[id];
+    else PEOPLE.people = PEOPLE.people.filter(p => p.id !== id);
+  }
+  merged = {};
+  applyPending();
+  for (const [id, n] of Object.entries(pendingNames)) {
+    const p = PEOPLE?.people?.find(x => x.id === id);
+    if (!p || (p.name || '') === n.name || stale(n)) delete pendingNames[id];
+    else p.name = n.name || null;
+  }
+}
+
+// pending marks, applied to PEOPLE; merged: id -> the id it was shown joined into
+let merged = {};
+function applyPending() {
+  const res = id => { for (let i = 0; i < 50 && merged[id]; i++) id = merged[id]; return id; };
+  for (const m of pendingSame) {
+    const a = res(m.a), b = res(m.b), keep = joinLocally(a, b);
+    if (keep) merged[keep === a ? b : a] = keep;
+  }
+  if (state.who) state.who = res(state.who);
+}
+
+// show two people as one right away (people.py does it for real on its next run)
+function joinLocally(a, b) {
+  const list = PEOPLE?.people || [];
+  let A = list.find(p => p.id === a), B = list.find(p => p.id === b);
+  if (!A || !B || A === B) return null;
+  if (B.n > A.n) [A, B] = [B, A];  // the bigger one keeps its id, like people.py
+  A.first = Math.min(A.first, B.first); A.last = Math.max(A.last, B.last);
+  A.name ||= B.name; A.joined = [...(A.joined || []), ...(B.joined || []), 'pending'];
+  PEOPLE.people = list.filter(p => p !== B);
+  const evs = new Set();  // count motion events, like people.py: two sightings in one event are one
+  for (const [f, rows] of Object.entries(PEOPLE.seen || {})) for (const x of rows) {
+    if (x[2] === B.id) x[2] = A.id;
+    if (x[2] === A.id) evs.add(f + '#' + x[0]);
+  }
+  A.n = evs.size;
+  if (state.who === B.id) state.who = A.id;
+  return A.id;
+}
+
+// which cameras have a recording in progress right now, from live-dvr.json (written per
+// stream by live_dvr.py, so unlike /stat it never misses a stream on another nginx worker)
+const dvrStreams = () => new Set(Object.keys(DVR?.dvr || {}).map(k => k.replace(/-\d+_.*$/, '')));
+
+// merge recordings index with the real-time live list
+function build() {
+  const now = Date.now() / 1000;
+  const STUB = 64 * 1024; // empty .flv files nginx creates on (re)connect
+  let list = RAW.map(r => ({ ...r }));
+  const growing = list.filter(r => r.status === 'recording');
+
+  // one live entry per stream: pick the file that best matches the real session
+  // /stat only reports one nginx worker's streams (multi-worker + rtmp_auto_push), so a
+  // publishing camera can be missing from it; trust a growing recording entry as live too.
+  const liveNames = [...new Set([...(LIVE ? [...LIVE.keys()] : []), ...growing.map(r => r.stream), ...dvrStreams()])];
+  const keep = new Set();
+  for (const name of liveNames) {
+    const cands = growing.filter(r => r.stream === name);
+    // the live file is the newest one still being written: with record_interval a session
+    // is split into several files, and after a reconnect the old file stops growing.
+    // (/stat's stream time isn't used: it follows the camera's own clock, which can reset.)
+    let best = cands.filter(r => (r.size || 0) >= STUB).sort((a, b) => b.start - a.start)[0] || null;
+    const statStart = LIVE?.get(name) ? now - LIVE.get(name).ms / 1000 : null;
+    if (!best) list.push(best = { file: 'live:' + name, stream: name, size: 0, status: 'recording', start: Math.round(statStart ?? now) });
+    keep.add(best);
+  }
+  list = list.filter(r => {
+    if (r.status !== 'recording' || keep.has(r)) return true;
+    if ((r.size || 0) < STUB) return false;   // hide empty stub files
+    r.status = 'processing';                   // earlier session, waiting for conversion
+    return true;
+  });
+  for (const r of list) if (r.status === 'recording' || r.status === 'processing') {
+    if (r.status === 'recording') r.duration = now - r.start;
+    r.dvr = DVR?.dvr?.[r.file] || null; // seekable HLS copy of the file so far
+    if (r.dvr?.thumb) { r.thumb = r.dvr.thumb; r.thumbV = r.dvr.thumbAt; } // refreshed every minute
+    // (motion is found by recordings.py once the recording is finished)
+  }
+  // who was seen in which motion event, and when: {event: {person id: offset}}, and from when
+  // to when they were in view: {event: {person id: [from, to]}} (offsets; older recordings
+  // have no range, just the moment of the snapshot)
+  for (const r of list) {
+    r.who = {}; r.inView = {};
+    for (const [ev, t, pid, , t0, t1] of PEOPLE?.seen?.[r.file] || []) {
+      (r.who[ev] ||= {})[pid] ??= t;
+      if (t0 == null) continue;
+      const v = (r.inView[ev] ||= {})[pid];
+      r.inView[ev][pid] = v ? [Math.min(v[0], t0), Math.max(v[1], t1)] : [t0, t1];
+    }
+  }
+  ALL = list.map(norm).sort((a, b) => b.start - a.start);
+  ALL.forEach(r => streamColor(r.stream));
+}
+
+async function load() {
+  try {
+    let recs;
+    try {
+      const r = await fetch(`${CFG.streams}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error(r.status);
+      STREAMS = (await r.json()).streams || [];
+      recs = (await perStream('index.json')).filter(Boolean).flatMap(t => JSON.parse(t).recordings || []);
+      source = 'index';
+    } catch {
+      const r = await fetch(CFG.fallback, { cache: 'no-store' });
+      if (!r.ok) throw new Error(`Could not load recordings (HTTP ${r.status})`);
+      const now = Date.now() / 1000;
+      recs = (await r.json())
+        .filter(f => f.type === 'file' && /\.(mp4|flv)$/i.test(f.name))
+        .map(f => {
+          const p = parseName(f.name), mt = Date.parse(f.mtime) / 1000;
+          const mp4 = /\.mp4$/i.test(f.name);
+          const start = p.start ?? mt;
+          return { file: f.name, stream: p.stream, start, duration: Math.max(0, mt - start), size: f.size,
+                   status: mp4 ? 'ready' : (now - mt < 90 ? 'recording' : 'flv') };
+        });
+      source = 'fallback';
+    }
+    RAW = recs;
+    await Promise.all([fetchStat(), fetchLiveDvr(), fetchPeople()]);
+    build();
+    render();
+    if (!loadedOnce) { loadedOnce = true; openFromHash(); }
+  } catch (e) {
+    if (!loadedOnce) $('#home').innerHTML = `<div class="empty"><b>Couldn't load recordings</b>${esc(e.message)}<br>Check that <code>/recordings/streams.json</code> or <code>/api/files/</code> is reachable.</div>`;
+  }
+}
+
+/* ===== render ===== */
+function render() {
+  visible = [...ALL];  // every recording, newest first
+  visible.forEach((r, i) => r._i = i);
+  renderHome();
+  if (currentFile) { renderPeople(); refreshPlayerMeta(); }
+}
+
+/* ===== home: one tile per camera, playing live while it is live ===== */
+const tiles = new Map(); // stream -> {el, video, hls, live}
+function homeStreams() {
+  return [...new Set([...STREAMS, ...(LIVE ? LIVE.keys() : []), ...ALL.map(r => r.stream)])].sort();
+}
+function renderHome() {
+  const home = $('#home'), names = homeStreams();
+  if (!names.length) { home.innerHTML = `<div class="empty"><b>No cameras yet</b>A camera appears here once it has streamed.</div>`; return; }
+  home.querySelector('.skeleton, .empty')?.remove();
+  for (const [n, t] of tiles) if (!names.includes(n)) { tileStop(t); t.el.remove(); tiles.delete(n); }
+  for (const n of names) {
+    let t = tiles.get(n);
+    if (!t) {
+      const el = document.createElement('button');
+      el.className = 'tile'; el.dataset.stream = n;
+      el.innerHTML = `<img alt="" hidden><video muted playsinline autoplay hidden></video>
+        <span class="st"><i></i><b></b></span><span class="hdt" title="Plays in HD (2304×1296)"${isHD(n) ? '' : ' hidden'}>HD</span><span class="nm">${esc(camName(n))}</span><span class="ago"></span>`;
+      home.appendChild(el);
+      t = { el, video: el.querySelector('video'), img: el.querySelector('img'), hls: null, live: null };
+      tiles.set(n, t);
+      // browsers pause muted videos now and then (a hidden tab, power saving): carry on
+      t.video.addEventListener('pause', () => setTimeout(() => {
+        if (t.live && !t.video.hidden && !document.hidden && !modal.classList.contains('open')) t.video.play().catch(() => {});
+      }, 1000));
+    }
+    const live = !!LIVE?.has(n) || dvrStreams().has(n) || ALL.some(r => r.stream === n && r.status === 'recording');
+    const last = ALL.find(r => r.stream === n && r.status !== 'recording');
+    t.el.classList.toggle('live', live);
+    t.el.querySelector('.st b').textContent = live ? 'LIVE' : 'Offline';
+    t.el.querySelector('.ago').textContent = live || !last ? '' : `last seen ${relDay(fromKey(last.day))} ${fmtTime(last.endD)}`;
+    t.el.title = live ? `Watch ${n} live` : `${n} is offline: open its recordings`;
+    if (!live && last?.thumb) { t.img.src = fileUrl(last.thumb) + (last.thumbV ? '?v=' + last.thumbV : ''); t.img.hidden = false; }
+    else t.img.hidden = true;
+    if (live !== t.live) { t.live = live; live && !modal.classList.contains('open') ? tilePlay(n, t) : tileStop(t); }
+  }
+}
+async function tilePlay(n, t) {
+  tileStop(t);
+  const url = isHD(n) ? liveUrl(n) : CFG.hls + encodeURIComponent(n) + '.m3u8', v = t.video;
+  v.hidden = false;
+  if (isHD(n) && hdRtOk() && !t.noRt) return tileRt(n, t);  // HD cameras: frames as they come
+  // hls.js where it works: native HLS in Chrome pauses at each jump to the live edge
+  for (const src of CFG.hlsJs) { if (window.Hls) break; await loadScript(src).catch(() => {}); }
+  if (!t.live) return;
+  if (!window.Hls || !Hls.isSupported()) { v.src = url; v.play().catch(() => {}); return; }
+  t.hls = new Hls({ liveSyncDurationCount: 3 });
+  t.hls.on(Hls.Events.ERROR, (_, d) => { if (d.fatal) setTimeout(() => t.hls && t.hls.startLoad(), 3000); });
+  t.hls.on(Hls.Events.MANIFEST_PARSED, () => v.play().catch(() => {}));
+  t.hls.loadSource(url); t.hls.attachMedia(v);
+  v.play().catch(() => {});
+}
+// an HD camera's tile, in real time: the live relay's picture (the player's live view does the
+// same, see hdRtStart; the tile is muted, so the sound messages are ignored). If it never
+// starts (relay out of reach, or this browser's MSE can't play it), the tile uses HLS.
+function tileRt(n, t) {
+  const v = t.video, ms = new MediaSource(), rt = t.rt = { ms, sb: null, queue: [], ws: null, url: URL.createObjectURL(ms), got: false };
+  v.src = rt.url;
+  const pump = () => {
+    if (t.rt !== rt || !rt.sb || rt.sb.updating || !rt.queue.length) return;
+    const parts = rt.queue.splice(0), all = new Uint8Array(parts.reduce((k, p) => k + p.byteLength, 0));
+    let o = 0; for (const p of parts) { all.set(new Uint8Array(p), o); o += p.byteLength; }
+    try { rt.sb.appendBuffer(all); } catch { again(); }
+  };
+  const follow = () => {  // close behind the newest frame; drop what's long played
+    const b = v.buffered; if (!b.length || rt.sb.updating) return;
+    const end = b.end(b.length - 1);
+    if (end - v.currentTime > 2.5 || v.currentTime < b.start(b.length - 1)) v.currentTime = Math.max(b.start(b.length - 1), end - RT_BEHIND);
+    if (v.currentTime - b.start(0) > 60) { try { rt.sb.remove(b.start(0), v.currentTime - 30); } catch {} }
+    if (v.paused) v.play().catch(() => {});
+  };
+  // the relay restarts with the recorder (the cloud ends a session every ~10 min): start over
+  const again = () => { if (t.rt === rt) setTimeout(() => { if (t.rt === rt && t.live) tilePlay(n, t); }, 2000); };
+  ms.addEventListener('sourceopen', () => {
+    const ws = rt.ws = new WebSocket(hdWsUrl(n));
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = e => {
+      if (t.rt !== rt) return;
+      if (typeof e.data === 'string') {
+        if (rt.sb) return again();
+        try { rt.sb = ms.addSourceBuffer(HD_MIME(false)); } catch { return toHls(); }
+        rt.sb.addEventListener('updateend', () => { follow(); pump(); });
+        return;
+      }
+      if (new Uint8Array(e.data, 0, 1)[0] !== 0) return;  // sound: the tile is muted
+      rt.got = true;
+      rt.queue.push(e.data.slice(1));
+      pump();
+    };
+    ws.onclose = again;
+  }, { once: true });
+  const toHls = () => { if (t.rt !== rt) return; t.noRt = true; tilePlay(n, t); };
+  rt.timer = setTimeout(() => { if (t.rt === rt && (!rt.got || v.readyState < 2)) toHls(); }, 10000);  // never started: HLS
+}
+function tileStop(t) {
+  if (t.rt) {
+    const rt = t.rt; t.rt = null;
+    clearTimeout(rt.timer);
+    if (rt.ws) { rt.ws.onclose = null; rt.ws.close(); }
+    URL.revokeObjectURL(rt.url);
+  }
+  if (t.hls) { t.hls.destroy(); t.hls = null; }
+  t.video.pause(); t.video.removeAttribute('src'); t.video.load(); t.video.hidden = true;
+}
+// the tiles only play while they are on screen (the recording view plays its own video)
+function homePause() { for (const t of tiles.values()) tileStop(t); }
+function homeResume() { for (const [n, t] of tiles) if (t.live) tilePlay(n, t); }
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden && !modal.classList.contains('open')) for (const t of tiles.values()) if (t.live && !t.video.hidden) t.video.play().catch(() => {});
+});
+// a camera's tile: live if it is, else its latest recording
+function openStream(n) {
+  const live = visible.findIndex(r => r.stream === n && r.status === 'recording');
+  if (live >= 0) return openPlayer(live, null, 'live');
+  const last = visible.findIndex(r => r.stream === n);
+  if (last >= 0) openPlayer(last);
+  else toast(`No recordings of ${n} yet`);
+}
+$('#home').addEventListener('click', e => { const t = e.target.closest('.tile'); if (t) openStream(t.dataset.stream); });
+
+// People row, like Google Photos: one avatar per person, tap to see only them
+// ids are per camera ("cam1-p3"): people are grouped separately for each stream
+const personName = p => p.name || `Person ${p.id.split('-p').pop()}`;
+function renderPeople() {
+  const cur = ALL.find(x => x.file === currentFile), cam = cur?.stream;
+  // only the people seen on the day being watched, counted by that day's events; while
+  // marking "same person" too (every one of that day's people, however rarely seen).
+  // Named people are always shown (first), even on a day they weren't seen (with 0)
+  const dayN = new Map();
+  for (const r of ALL) if (cur && r.stream === cam && r.day === cur.day)
+    for (const seen of Object.values(r.who || {})) for (const id of Object.keys(seen)) dayN.set(id, (dayN.get(id) || 0) + 1);
+  const all = (PEOPLE?.people || []).filter(p => p.stream === cam && (dayN.has(p.id) || p.name || p.id === state.who))
+    .map(p => ({ ...p, n: dayN.get(p.id) || 0, total: p.n }))
+    .sort((a, b) => !!b.name - !!a.name || b.n - a.n);   // named first, then by count
+  // how many different people were seen this day (named ones not seen don't count)
+  const seenN = all.filter(p => p.n > 0).length;
+  $('#peopleN').textContent = cur ? ` · ${seenN} seen this day` : '';
+  const shown = all.filter(p => peopleAll || pick || p.name || p.total >= CFG.peopleMin || p.id === state.who);
+  const hidden = all.length - shown.length;
+  const streams = [...new Set(shown.map(p => p.stream))];
+  const from = pick && all.find(p => p.id === pick.from);
+  $('#people').classList.toggle('picking', !!pick);
+  $('#people').innerHTML = !all.length ? '' : streams.map(st =>
+    shown.filter(p => p.stream === st).map(p =>
+    `<button class="who${p.id === state.who ? ' on' : ''}${pick?.to.includes(p.id) ? ' sel' : ''}" data-who="${esc(p.id)}"${pick && (p.id === pick.from || p.stream !== from?.stream) ? ' disabled' : ''} title="${esc(personName(p))} (${esc(p.stream)}) · seen ${p.n}× this day, ${p.total}× in all, last${esc(fmtDateShort(new Date(p.last * 1000)))} ${esc(fmtTime(new Date(p.last * 1000)))}">
+      <i>${p.thumb ? `<img loading="lazy" src="${fileUrl(p.thumb)}" alt="">` : ''}<b>${p.n}</b></i>
+      <span>${esc(personName(p))}</span></button>`).join('')).join('') +
+    (pick ? '' : hidden ? `<button class="more" data-more="1">+ ${hidden} more</button>` : peopleAll ? `<button class="more" data-more="0">Fewer</button>` : '');
+  renderWhoBar();
+}
+
+// the picked person's bar: "Same person as…" (then tap the other one), or undo a merge
+function renderWhoBar() {
+  const list = PEOPLE?.people || [], bar = $('#whoBar');
+  const face = p => p?.thumb ? `<img src="${fileUrl(p.thumb)}" alt="">` : '';
+  const cur = list.find(p => p.id === (pick?.from || state.who));
+  if (!cur) { bar.hidden = true; pick = null; naming = false; return; }
+  bar.hidden = false;
+  if (naming) {
+    bar.innerHTML = `${face(cur)}<input id="whoName" maxlength="40" placeholder="Name for ${esc(personName({ id: cur.id }))}" value="${esc(cur.name || '')}" aria-label="Name">
+      <button class="primary" data-act="name">Save</button><button data-act="cancel">Cancel</button>`;
+    $('#whoName').focus(); $('#whoName').select();
+  } else if (pick) {
+    const others = pick.to.map(id => list.find(p => p.id === id)).filter(Boolean);
+    bar.innerHTML = `<span class="pair">${face(cur)}${others.slice(0, 5).map(face).join('')}${others.length > 5 ? `<small>+${others.length - 5}</small>` : ''}</span>
+      <span class="sp">${others.length ? `<b>${others.length}</b> selected as <b>${esc(personName(cur))}</b>. Tap more, or tap again to unselect.`
+                                        : `Tap every other photo of <b>${esc(personName(cur))}</b> above`}</span>
+      ${others.length ? `<button class="primary" data-act="confirm">Same person (${others.length + 1})</button>` : ''}
+      <button data-act="cancel">Cancel</button>`;
+  } else {
+    bar.innerHTML = `${face(cur)}<span class="sp"><b>${esc(personName(cur))}</b> · seen ${cur.n}×${cur.joined?.length ? ' · merged' : ''}</span>
+      <button data-act="rename">${cur.name ? 'Rename' : 'Name'}</button>
+      <button data-act="same" title="Mark another person as this one. It also teaches the grouping what this person looks like.">Same person as…</button>
+      ${cur.joined?.length ? `<button data-act="separate" title="Undo the merges into this person">Undo merge</button>` : ''}
+      <button data-act="object" title="A poster, a sack, a statue… taken for a person: hide it, and whatever else is seen like it">Not a person</button>`;
+  }
+}
+
+async function peopleApi(what, body) {
+  const r = await fetch(CFG.peopleApi + what, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const out = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(out.error || `HTTP ${r.status}`);
+  return out;
+}
+
+$('#whoBar').addEventListener('click', async e => {
+  const b = e.target.closest('button[data-act]'); if (!b) return;
+  const act = b.dataset.act;
+  if (act === 'same') { pick = { from: state.who, to: [] }; renderPeople(); return; }
+  if (act === 'cancel') { pick = null; naming = false; renderPeople(); return; }
+  if (act === 'rename') { naming = true; renderWhoBar(); return; }
+  const who = PEOPLE?.people?.find(p => p.id === state.who);
+  if (act === 'object' && !confirm(`Hide “${personName(who || { id: state.who })}” as not a person?\n\nFor posters, sacks and other things mistaken for a person. New sightings that look like it are hidden too.`)) return;
+  $('#whoBar').querySelectorAll('button').forEach(x => x.disabled = true);
+  try {
+    if (act === 'confirm') {
+      const { from, to } = pick;
+      let done = 0;
+      try {
+        for (const b of to) {  // one mark per person (the ids are the server's, unchanged until it regroups)
+          const { mark } = await peopleApi('same', { a: from, b });
+          pendingSame.push({ a: from, b, mark, at: Date.now() / 1000 });
+          done++;
+        }
+      } finally {
+        if (done) {
+          pick = null;
+          applyPending();
+          build(); render();
+        }
+      }
+      toast(`Marked ${done + 1} as the same person. New sightings will be grouped with that in mind.`);
+    } else if (act === 'name') {
+      const id = state.who, { name } = await peopleApi('name', { id, name: $('#whoName').value });
+      naming = false;
+      pendingNames[id] = { name, at: Date.now() / 1000 };
+      const p = PEOPLE.people.find(x => x.id === id); if (p) p.name = name || null;
+      render();
+      toast(name ? `Named ${name}` : 'Name removed');
+    } else if (act === 'object') {
+      const id = state.who;
+      await peopleApi('object', { id });
+      pendingObjects[id] = Date.now() / 1000;
+      PEOPLE.people = PEOPLE.people.filter(p => p.id !== id);
+      state.who = '';
+      render();
+      toast('Hidden: not a person. Its marks leave the time bar within a minute or two.');
+    } else if (act === 'separate') {
+      await peopleApi('separate', { id: state.who });
+      pendingSame = pendingSame.filter(m => m.a !== state.who && m.b !== state.who);
+      toast('Merge undone. They’ll show as separate people again within a minute.');
+      renderWhoBar();
+    }
+  } catch (err) {
+    toast(`Couldn’t save that: ${err.message}`);
+    renderWhoBar();
+  }
+});
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && (pick || naming)) { pick = null; naming = false; renderPeople(); e.stopPropagation(); }
+}, true);
+$('#whoBar').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.id === 'whoName') { e.preventDefault(); $('#whoBar [data-act=name]').click(); }
+});
+
+$('#people').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.more) { peopleAll = b.dataset.more === '1'; renderPeople(); return; }
+  if (pick) {  // choosing: tap to add, again to remove
+    if (!b.disabled) {
+      const id = b.dataset.who;
+      pick.to = pick.to.includes(id) ? pick.to.filter(x => x !== id) : [...pick.to, id];
+      renderPeople();
+    }
+    return;
+  }
+  naming = false;
+  state.who = state.who === b.dataset.who ? '' : b.dataset.who;  // tap again for everyone
+  if (state.who) scrub.kind = 'person';  // every event of theirs is a sighting
+  render();
+});
+
+// whole hours (seconds from midnight) that cover a day's recordings, at least 2h
+function tlRange(d0, recs) {
+  let a = Infinity, b = -Infinity;
+  for (const r of recs) {
+    const s = Math.max(r.start, d0), e = Math.min(r.start + Math.max(r.dur, 60), d0 + 86400);
+    if (e > s) { a = Math.min(a, s); b = Math.max(b, e); }
+  }
+  if (!(a < b)) return null;
+  let lo = Math.floor((a - d0) / 3600) * 3600, hi = Math.ceil((b - d0) / 3600) * 3600;
+  if (hi - lo < 7200) { hi = Math.min(86400, lo + 7200); lo = Math.max(0, hi - 7200); }
+  return { lo, hi, b };
+}
+const TICK_STEPS = [5, 10, 15, 30, 60, 120, 180, 360]; // minutes
+const hhmm = t => `${pad(Math.floor(t / 3600))}:${pad(Math.floor(t % 3600 / 60))}`;
+// the recording under time t (epoch s); in a gap, the nearest one
+function recAt(recs, t) {
+  let best = null, bestGap = Infinity;
+  for (const r of recs) {
+    const e = r.start + Math.max(r.dur, 1);
+    const gap = t < r.start ? r.start - t : t >= e ? t - e : -r.start; // inside: prefer the latest start
+    if (gap < bestGap) { best = r; bestGap = gap; }
+  }
+  return best;
+}
+const clampOff = (r, t) => Math.min(Math.max(0, t - r.start), Math.max(0, (r.dur || 0) - .5));
+
+// motion events (from recordings.py) as absolute epoch-second spans
+// labels: what detect.py recognised in the event, {person|cat|dog|bird: [score, offset]}
+const PETS = ['cat', 'dog', 'bird'];
+const motionOf = r => (r.motion || []).map(([s, e, p, L], i) => {
+  L = L && typeof L === 'object' ? L : {};
+  const kind = L.person ? 'person' : PETS.some(k => L[k]) ? 'pet' : 'motion';
+  const seen = r.who?.[i] || {};
+  return { s: r.start + s, e: r.start + e, p, L, kind, r, who: Object.keys(seen), seen, inView: r.inView?.[i] || {} };
+});
+// when one person was in view in an event, as epoch seconds: their first to last keyframe
+// (~2 s apart) widened by a second each side, inside the event; null if not seen in it
+const inViewOf = (m, id) => {
+  const v = m.inView[id]; if (!v) return null;
+  const s = Math.max(m.s, m.r.start + v[0] - 1), e = Math.min(m.e, m.r.start + v[1] + 1);
+  return e > s ? [s, e] : [m.s, m.e];
+};
+const inViewText = ([s, e]) => `in view ${fmtTimeS(new Date(s * 1000))}–${fmtTimeS(new Date(e * 1000))} · ${fmtDur(e - s)}`;
+// plain motion is never shown: only events with a person or a pet in them. With a person
+// picked in the People row, their sightings are the events (whatever else was seen)
+const isKind = (m, k) => state.who ? m.who.includes(state.who)
+  : k === 'person' ? !!m.L.person : k === 'pet' ? PETS.some(x => m.L[x]) : false;
+const KIND = { motion: ['motion', 'motion'], person: ['person', 'people'], pet: ['pet', 'pets'] };
+const kindLabel = (k, n) => `${n} ${KIND[k][n === 1 ? 0 : 1]}`;
+// the model often mixes up cat / dog / bird at night, so they are all just "pet"
+const seenText = m => {
+  const pet = Math.max(0, ...PETS.map(k => m.L[k]?.[0] || 0));
+  return [m.L.person && `Person ${Math.round(m.L.person[0] * 100)}%`, pet && `Pet ${Math.round(pet * 100)}%`]
+    .filter(Boolean).join(' · ');
+};
+// only: 'person' / 'pet' — the events of that kind (see isKind)
+// car presence (car_presence.py): per camera and day, 2 bitmaps of 1440 minutes ("car", "seen")
+const carCache = {};
+function carBits(stream, day, d0) {
+  const k = stream + '|' + day, c = carCache[k], now = Date.now();
+  const live = now / 1000 - d0 < 90000;  // the day is still being filled in
+  if ((!c || (live && now - c.at > (c.bits ? 60e3 : 600e3))) && !c?.loading) {
+    carCache[k] = { ...c, loading: true };
+    fetch(CFG.base + `${encodeURIComponent(stream)}/car/${day}.bin`, { cache: 'no-store' })
+      .then(r => r.ok ? r.arrayBuffer() : null)
+      .then(b => { carCache[k] = { at: Date.now(), bits: b && b.byteLength === 360 ? new Uint8Array(b) : null }; if (b) renderScrub(); })
+      .catch(() => { carCache[k] = { at: Date.now(), bits: null }; });
+  }
+  return c?.bits || null;
+}
+const carRaw = (b, m) => (b[180 + (m >> 3)] >> (m & 7)) & 1 ? (b[m >> 3] >> (m & 7)) & 1 : -1; // 1 car, 0 no car, -1 can't tell
+// a "no car" that lasts under CAR_AWAY_MIN checked minutes is a miss (a trip takes longer):
+// shown as the car still there. The file keeps what was seen each minute.
+const CAR_AWAY_MIN = 10, carSmooth = new WeakMap();
+function carStates(b) {
+  let st = carSmooth.get(b);
+  if (st) return st;
+  st = Array.from({ length: 1440 }, (_, m) => carRaw(b, m));
+  for (let m = 0; m < 1440;) {
+    if (st[m] !== 0) { m++; continue; }
+    let e = m, n = 0;  // the run of "no car", unknown minutes inside it not counting
+    while (e < 1440 && st[e] !== 1) { if (st[e] === 0) n++; e++; }
+    if (n < CAR_AWAY_MIN) for (let k = m; k < e; k++) if (st[k] === 0) st[k] = 1;
+    m = e;
+  }
+  carSmooth.set(b, st);
+  return st;
+}
+const carState = (b, m) => carStates(b)[m];
+function carMarks(bits, d0, base, span) {
+  if (!bits) return '';
+  const out = [];
+  for (let m = 0; m < 1440;) {
+    const v = carState(bits, m);
+    let e = m + 1;
+    while (e < 1440 && carState(bits, e) === v) e++;
+    const s = Math.max(d0 + m * 60, base), t = Math.min(d0 + e * 60, base + span);
+    if (v >= 0 && t > s) out.push(`<span class="car${v ? '' : ' off'}" style="left:${(s - base) / span * 100}%;width:${(t - s) / span * 100}%"></span>`);
+    m = e;
+  }
+  return out.join('');
+}
+// "car here since 07:12" / "car away since 17:30", from the last minute it could be checked
+function carText(bits, d0) {
+  if (!bits) return '';
+  let m = 1439;
+  while (m >= 0 && carState(bits, m) < 0) m--;
+  if (m < 0) return '';
+  const v = carState(bits, m);
+  let s = m;  // back to the first minute seen so, unknown minutes in between don't count
+  for (let k = m - 1; k >= 0; k--) {
+    const x = carState(bits, k);
+    if (x === 1 - v) break;
+    if (x === v) s = k;
+  }
+  return ` · car ${v ? 'here' : 'away'} since ${hhmm(s * 60)}`;
+}
+function motionMarks(recs, base, span, cls, only = 'person') {
+  return recs.flatMap(motionOf).filter(m => isKind(m, only)).map(m => {
+    // a person picked: just the part of the event they were in view
+    const v = state.who && inViewOf(m, state.who);
+    const s = Math.max(v ? v[0] : m.s, base), e = Math.min(v ? v[1] : m.e, base + span);
+    if (e <= s) return '';
+    const what = seenText(m) || 'Sighting';
+    return `<span class="${cls} ${only === 'person' || only === 'pet' ? only : m.kind}" style="left:${(s - base) / span * 100}%;width:${(e - s) / span * 100}%" title="${what} · ${v ? inViewText(v) : fmtTimeS(new Date(m.s * 1000))}"></span>`;
+  }).join('');
+}
+// the time bar's top lane: one icon per person / pet sighting, nearby ones (within 40 px of the first) merged with a count
+const SVG_A = 'viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+const ICON_PERSON = `<svg class="pe" ${SVG_A}><circle cx="12" cy="7" r="4"/><path d="M5.5 21v-2a4 4 0 0 1 4-4h5a4 4 0 0 1 4 4v2"/></svg>`;
+const ICON_PAW = `<svg class="pw" ${SVG_A}><path d="M14.7 13.5c-1-1.8-1.5-2.5-2.7-2.5s-1.7.7-2.7 2.5c-1.3 1.8-3.3 2.3-3.3 4.2 0 1.4 1 2.3 2.5 2.3 1.3 0 2.4-.9 3.5-.9s2.2.9 3.5.9c1.5 0 2.5-.9 2.5-2.3 0-1.9-2-2.4-3.3-4.2z"/><circle cx="5" cy="10" r="1.2"/><circle cx="19" cy="10" r="1.2"/><circle cx="9" cy="5.5" r="1.2"/><circle cx="15" cy="5.5" r="1.2"/></svg>`;
+const CAR_SVG = `<svg width="15" height="15" ${SVG_A}><path d="M5 17H3v-6l2-5h9l4 5h1a2 2 0 0 1 2 2v4h-2m-4 0H9"/><circle cx="7" cy="17" r="2"/><circle cx="17" cy="17" r="2"/></svg>`;
+function eventIcons(recs, base, span, W) {
+  const evs = recs.flatMap(motionOf).filter(m => isKind(m, 'person') || isKind(m, 'pet'))
+    .map(m => { const v = state.who && inViewOf(m, state.who); return { t: v ? v[0] : m.s, pet: !state.who && !m.L.person }; })
+    .filter(e => e.t >= base && e.t <= base + span).sort((a, b) => a.t - b.t);
+  const cl = [];
+  for (const e of evs) {
+    const x = (e.t - base) / span * W, c = cl[cl.length - 1];
+    if (c && x - c.x0 < 40) { c.x1 = x; c.t1 = e.t; c.n++; c[e.pet ? 'pet' : 'p']++; }
+    else cl.push({ x0: x, x1: x, t0: e.t, t1: e.t, n: 1, p: e.pet ? 0 : 1, pet: e.pet ? 1 : 0 });
+  }
+  return cl.map(c => `<span class="ev" style="left:${(c.x0 + c.x1) / 2 / W * 100}%" title="${c.n} · ${fmtTime(new Date(c.t0 * 1000))}${c.t1 - c.t0 > 59 ? '–' + fmtTime(new Date(c.t1 * 1000)) : ''}">${c.p ? ICON_PERSON : ''}${c.pet ? ICON_PAW : ''}${c.n > 1 ? `<sup>${c.n}</sup>` : ''}</span>`).join('');
+}
+const kindCount = (recs, k) => recs.reduce((n, r) => n + motionOf(r).filter(m => isKind(m, k)).length, 0);
+/* ===== player ===== */
+const modal = $('#modal'), video = $('#video');
+
+let hls = null;
+// Switching files blanks the video until the new one has a picture: keep the last frame on
+// screen meanwhile (a canvas over the video) instead of flashing black.
+const freeze = $('#freeze');
+let freezeT = 0;
+function holdFrame() {
+  if (video.hidden || video.readyState < 2 || !video.videoWidth) return;
+  try {
+    freeze.width = video.videoWidth; freeze.height = video.videoHeight;
+    freeze.getContext('2d').drawImage(video, 0, 0);
+  } catch { return; }
+  Object.assign(freeze.style, { left: video.offsetLeft + 'px', top: video.offsetTop + 'px',
+    width: video.offsetWidth + 'px', height: video.offsetHeight + 'px' });
+  freeze.hidden = false;
+  clearTimeout(freezeT); freezeT = setTimeout(releaseFrame, 5000); // never stuck on a stale frame
+}
+function releaseFrame() { freeze.hidden = true; clearTimeout(freezeT); }
+// the new picture is up once a pending seek is done (or there was none)
+video.addEventListener('seeked', () => { if (video._seekAt == null) releaseFrame(); });
+video.addEventListener('loadeddata', () => { if (video._seekAt == null && !video.seeking) releaseFrame(); });
+video.addEventListener('playing', () => { if (video._seekAt == null && !video.seeking) releaseFrame(); });
+
+function stopLive() {
+  if (hls) { hls.destroy(); hls = null; }
+  if (video.dataset.live) { video.pause(); video.removeAttribute('src'); video.load(); delete video.dataset.live; delete video.dataset.file; delete video.dataset.src; }
+  video._liveSeek = null;
+}
+function loadScript(src) {
+  return new Promise((res, rej) => { const el = document.createElement('script'); el.src = src; el.onload = res; el.onerror = () => { el.remove(); rej(); }; document.head.appendChild(el); });
+}
+function showNope(html) {
+  video.hidden = true; $('#nope').hidden = false; $('#nope').innerHTML = html;
+  $('#liveBadge').hidden = true;
+}
+// The recording that is still being written has two views:
+//  'rec'  - live_dvr.py's HLS copy of the growing file: the whole recording so far,
+//           seekable, 10-20 s behind. The default.
+//  'live' - nginx's own low-latency HLS of the stream: just the last seconds, no rewinding.
+const viewMode = () => video.dataset.live || null;
+// seekTo: epoch time to open the recording copy at (it's still growing, so hls.js would
+// otherwise start at its live edge, i.e. "now")
+async function playCurrent(r, mode, seekTo = null) {
+  if (mode === 'rec' && !r.dvr) mode = 'live';
+  const url = mode === 'rec' ? fileUrl(r.dvr.path) : CFG.hls + encodeURIComponent(r.stream) + '.m3u8';
+  if (video.dataset.file === r.file && video.dataset.src === url) return;
+  holdFrame();
+  stopLive();
+  video.dataset.file = r.file; video.dataset.live = mode; video.dataset.src = url;
+  if (mode === 'rec' && seekTo != null) video._liveSeek = seekTo; // applied (exactly) on canplay
+  updateGoLive();
+  const liveErr = mode === 'live'
+    ? `<b>Live preview unavailable</b>Couldn't load the live stream. Make sure HLS is turned on in nginx.conf and the stream uses H.264/AAC.`
+    : `<b>Recording unavailable</b>Couldn't load the recording in progress. Try Live instead.`;
+  try {
+    const native = video.canPlayType('application/vnd.apple.mpegurl');
+    {
+      // hls.js wherever it works (also iOS 17.1+): the recording copy is served without an
+      // HLS content type, and Chrome's native HLS pauses at each jump to the live edge;
+      // plain native playback is the fallback (older iPhones)
+      for (const src of CFG.hlsJs) { if (window.Hls) break; await loadScript(src).catch(() => {}); }
+      if (!window.Hls || !Hls.isSupported()) {
+        if (!native) throw new Error('unsupported');
+        video.src = url;
+        video.play().catch(() => {});
+        return;
+      }
+      hls = new Hls({ liveSyncDurationCount: 3, lowLatencyMode: false,
+                      startPosition: mode === 'rec' && seekTo != null ? Math.max(0, seekTo - r.dvr.start) : -1 });
+      hls.on(Hls.Events.ERROR, (_, d) => {
+        if (!d.fatal) return;
+        if (d.type === Hls.ErrorTypes.NETWORK_ERROR) setTimeout(() => hls && hls.startLoad(), 3000);
+        else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) hls.recoverMediaError();
+        else { stopLive(); showNope(liveErr); }
+      });
+      hls.loadSource(url); hls.attachMedia(video);
+    }
+    video.play().catch(() => {});
+  } catch { stopLive(); showNope(liveErr); }
+}
+// a recording whose file is still an .flv but can be played from live_dvr.py's copy
+const unfinished = r => r.status === 'recording' || (r.status === 'processing' && !!r.dvr);
+// epoch seconds at currentTime 0 of the recording view (its first real frame)
+function recOffset() {
+  const r = ALL.find(x => x.file === currentFile);
+  return viewMode() === 'rec' && r?.dvr ? r.dvr.start : null;
+}
+// show time t (epoch s) of the recording in progress, switching to the recording view if needed
+function liveSeek(t) {
+  const r = ALL.find(x => x.file === currentFile); if (!r) return;
+  if (!r.dvr) { toast('The recording in progress isn’t ready to rewind yet. Try again in a few seconds.'); return; }
+  if (viewMode() !== 'rec') { playCurrent(r, 'rec', t); return; }
+  const o = recOffset(), s = video.seekable;
+  if (!s.length) { video._liveSeek = t; return; } // apply once it has loaded
+  video.currentTime = Math.max(0, Math.min(t, o + s.end(s.length - 1) - 1) - o);
+  video.play().catch(() => {});
+}
+video.addEventListener('canplay', () => {
+  if (video._liveSeek != null) { const t = video._liveSeek; video._liveSeek = null; liveSeek(t); }
+});
+// the live stream to go to from whatever is playing: the same camera if it's live, else any
+function liveTarget() {
+  const cur = ALL.find(x => x.file === currentFile), live = ALL.filter(r => r.status === 'recording');
+  return live.find(r => r.stream === cur?.stream) || live[0] || null;
+}
+function openLive(target = null) {
+  const i = visible.findIndex(r => target ? r.file === target.file : r.status === 'recording');
+  if (i >= 0) openPlayer(i, null, 'live');
+}
+function goLive() {
+  if (hd.on) return hdShowAt(null);  // HD cameras: their own live stream
+  const t = liveTarget(); if (!t) return;
+  if (t.file === currentFile) hd.on ? hdShowAt(null) : playCurrent(t, 'live');
+  else openLive(t);
+}
+// shown while live is there to go to; hidden when already watching live. HD cameras: while
+// their live HD stream is (the camera's cloud link drops now and then); others: while a
+// stream is live
+function updateGoLive() {
+  const t = liveTarget(), b = $('#goLive');
+  const cur = ALL.find(x => x.file === currentFile), badge = $('#liveBadge');
+  if (hd.on && cur) {
+    b.hidden = !hdLiveAvailable(cur.stream) || hdEdge();
+    b.title = `Watch ${camName(cur.stream)} live`;
+  } else {
+    b.hidden = !t || viewMode() === 'live';
+    if (t) b.title = `Watch ${camName(t.stream)} live`;
+  }
+  // the LIVE badge on the picture: only while showing the live stream itself
+  // (Live at the live edge, Recording when watching the past)
+  const atLive = hd.on ? hdEdge() : viewMode() === 'live';
+  badge.hidden = hd.on ? hdVideo.hidden : video.hidden;
+  $('#vClock').hidden = badge.hidden;
+  badge.classList.toggle('rec', !atLive);
+  $('#liveBadgeWord').textContent = atLive ? 'Live' : 'Recording';
+  if (cur && !b.hidden) b.textContent = cur.day === dayKey(new Date()) ? 'LIVE ›' : 'Back to today';
+}
+const hashFor = r => r.status === 'recording' ? '#live=' + encodeURIComponent(r.stream) : '#play=' + encodeURIComponent(r.file);
+
+// at: seconds into the recording to start from (omit to resume / start at 0)
+// mode: for the recording in progress, 'rec' (default) or 'live'
+function openPlayer(i, at = null, mode = null) {
+  const r = visible[i]; if (!r) return;
+  if (!isHD(r.stream)) hdOff();
+  currentFile = r.file;
+  if (isHD(r.stream)) {
+    // only HD: the normal video isn't loaded (at: seconds into the recording; an epoch time
+    // for one in progress)
+    stopLive();
+    video.pause(); video.removeAttribute('src'); video.load(); delete video.dataset.file;
+    video.hidden = false; $('#nope').hidden = true; releaseFrame();
+    hd.on = true;
+    const t = r.status === 'recording' ? (mode === 'rec' ? at : null)
+            : unfinished(r) ? at ?? r.start : r.start + (at ?? 0);
+    hdShowAt(t);
+  } else if (unfinished(r)) {
+    video.hidden = false; $('#nope').hidden = true;
+    // a recording in progress opens live; seeking back switches to its recording copy (liveSeek)
+    const m = r.status === 'recording' ? mode || 'live' : 'rec';
+    if (m === 'live' && speed !== 1) { speed = 1; setRate(1); [...$('#speeds').children].forEach(x => x.classList.toggle('on', x.dataset.s === '1')); }
+    playCurrent(r, m, m === 'rec' ? at : null); // `at` is an epoch time here
+  } else if (r.playable) {
+    stopLive();
+    video.hidden = false; $('#nope').hidden = true;
+    if (video.dataset.file !== r.file) { holdFrame(); video._seekAt = at; video.src = fileUrl(r.path || r.file); video.dataset.file = r.file; }
+    else if (at != null) { if (video.readyState >= 1) video.currentTime = at; else video._seekAt = at; }
+    setRate(speed);
+    video.play().catch(() => {});
+  } else {
+    stopLive();
+    video.pause(); video.removeAttribute('src'); video.load(); delete video.dataset.file;
+    showNope(r.status === 'processing'
+      ? `<b>Processing</b>This stream just ended. It will be playable here in a minute or two.`
+      : `<b>Not playable in the browser</b>This recording is still in FLV format. You can download it and play it in VLC, or wait for the converter to process it.`);
+  }
+  speedOff = !hd.on && (!(r.playable || unfinished(r)) || (r.status === 'recording' && !r.dvr));
+  syncVctl();
+  $('#pDownload').href = fileUrl(r.path || r.file);
+  $('#pDownload').setAttribute('download', r.file);
+  $('#pDownload').style.display = r.status === 'recording' || r.status === 'processing' ? 'none' : '';
+  $('#pDownload').title = 'Download this recording';
+  hdUpdate();  // HD: the tag, and download saves the HD clip
+  refreshPlayerMeta();
+  if (!modal.classList.contains('open')) {
+    homePause();
+    modal.classList.add('open'); modal.setAttribute('aria-hidden', 'false');
+    document.body.style.overflow = 'hidden';
+  }
+  renderPeople();
+  renderScrub(); // needs the modal laid out to measure the bar
+  const hash = hashFor(r);
+  if (history.state?.player) history.replaceState({ player: 1 }, '', hash);
+  else history.pushState({ player: 1 }, '', hash);
+}
+
+function refreshPlayerMeta() {
+  const i = visible.findIndex(r => r.file === currentFile);
+  const r = ALL.find(x => x.file === currentFile) || visible[i];
+  if (!r) return;
+  const rd = relDay(fromKey(r.day));  // Today / Yesterday; older days as a date
+  $('#pTitle').textContent = rd === 'Today' || rd === 'Yesterday' ? rd : fromKey(r.day).toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' });
+  $('#pTitle').title = fmtDateLong(fromKey(r.day));
+  // (Live / Recording is the badge on the picture)
+  $('#pSub').innerHTML = r.status === 'recording'
+    ? `Started ${fmtTime(r.startD)}` + (!hd.on && viewMode() !== 'live' ? ' · 10–20 s behind live' : '')
+    : esc(`${fmtTime(r.startD)} – ${fmtTime(r.endD)} · ${fmtDur(r.dur)}`);
+  updateGoLive();
+  if (modal.classList.contains('open')) renderScrub();
+}
+
+// the camera's previous / next day with recordings (d: -1 / 1), from the open recording
+function dayOf(d) {
+  const cur = ALL.find(x => x.file === currentFile); if (!cur) return null;
+  const days = [...new Set(ALL.filter(r => r.stream === cur.stream).map(r => r.day))].sort();
+  return days[days.indexOf(cur.day) + d] || null;
+}
+// open that day's first recording (today's recording in progress opens live)
+function dayStep(d) {
+  const day = dayOf(d); if (!day) return;
+  const cur = ALL.find(x => x.file === currentFile);
+  const recs = visible.filter(r => r.stream === cur.stream && r.day === day).sort((a, b) => a.start - b.start);
+  if (recs.length) openPlayer(recs[0]._i, unfinished(recs[0]) ? null : 0);
+}
+
+/* ===== player time bar: the day's recordings of this stream, drag to scrub across them ===== */
+// base/span: the time range the whole bar covers; z: zoom factor (bar width = z x visible width)
+const scrub = { recs: [], base: 0, span: 0, drag: false, kind: 'person', z: 1, key: '', userScroll: 0, progScroll: false };
+const scrubTrack = $('#scrubTrack'), scrubScroll = $('#scrubScroll');
+const SCRUB_STEPS = [1, 2, ...TICK_STEPS]; // tick spacing in minutes
+const ZOOM_MIN_SPAN = 180;                // don't zoom in further than 3 minutes on screen
+const fmtSpan = s => s >= 5400 ? `${+(s / 3600).toFixed(1)} h` : `${Math.round(s / 60)} min`;
+
+function renderScrub() {
+  const cur = ALL.find(x => x.file === currentFile);
+  const recs = cur ? visible.filter(r => r.day === cur.day && r.stream === cur.stream) : [];
+  if (cur && !recs.some(r => r.file === cur.file)) recs.push(cur);
+  const d0 = cur && fromKey(cur.day).getTime() / 1000;
+  const rg = cur && tlRange(d0, recs);
+  $('#scrub').hidden = !rg;
+  if (!rg || scrub.drag) return;
+  scrub.recs = recs; scrub.base = d0 + rg.lo; scrub.span = rg.hi - rg.lo;
+  const key = cur.day + '|' + cur.stream;
+  if (scrub.key !== key) { scrub.key = key; scrub.z = 1; }  // another day or camera: whole day again
+  const V = scrubScroll.clientWidth || 300;                 // visible width
+  scrub.z = Math.min(Math.max(1, scrub.z), zoomMax());
+  const W = V * scrub.z, pxH = W / (scrub.span / 3600);
+  $('#scrubInner').style.width = W + 'px';
+  scrubScroll.classList.toggle('zoomed', scrub.z > 1);
+  const step = SCRUB_STEPS.find(m => m / 60 * pxH >= 50) || 360, stepPx = step / 60 * pxH;
+  $('#scrubSegs').innerHTML = recs.map(r => {
+    const s = Math.max(r.start, scrub.base), e = Math.min(r.start + Math.max(r.dur, 20), scrub.base + scrub.span);
+    if (e <= s) return '';
+    const bg = r.status === 'ready' ? `background:${streamColor(r.stream)};` : '';
+    return `<span class="sg ${r.status}${r.file === currentFile ? ' cur' : ''}" style="left:${(s - scrub.base) / scrub.span * 100}%;width:${(e - s) / scrub.span * 100}%;${bg}"></span>`;
+  }).join('') + hdMarks(cur.stream, cur.day, scrub.base, scrub.span)
+    + eventIcons(recs, scrub.base, scrub.span, W) + carMarks(carBits(cur.stream, cur.day, d0), d0, scrub.base, scrub.span);
+  $('#scrubSegs').classList.toggle('hdmode', hd.on);
+  renderMoNav();
+  const ticks = [];
+  for (let t = rg.lo; t <= rg.hi; t += step * 60)
+    ticks.push(`<span class="${t === rg.lo ? 'start' : t === rg.hi ? 'end' : ''}" style="left:${(t - rg.lo) / scrub.span * 100}%">${hhmm(t)}</span>`);
+  $('#scrubTicks').innerHTML = ticks.join('');
+  scrubTrack.style.backgroundImage = `repeating-linear-gradient(to right,rgba(255,255,255,.08) 0 1px,transparent 1px ${stepPx}px)`;
+  const ct = carText(carCache[cur.stream + '|' + cur.day]?.bits, d0).replace(/^ · c/, 'C');
+  $('#scrubDay').innerHTML = ct ? CAR_SVG + esc(ct) : '';
+  // the scale buttons: the one matching what's on screen is lit, ones finer than the zoom limit are off
+  const shown = scrub.span / scrub.z;
+  for (const b of $('#zoom').children) {
+    const s = +b.dataset.span;
+    b.disabled = s > 0 && s >= scrub.span * .95;  // a "6 h" view of a 4 h day is just the day
+    b.classList.toggle('on', s ? !b.disabled && Math.abs(shown / s - 1) < .06 : scrub.z <= 1.001);
+  }
+  $('#zoom').title = `Showing ${scrub.z > 1 ? fmtSpan(shown) : 'the whole day'} · scroll or pinch on the bar to zoom`;
+  movePlayhead();
+}
+
+const zoomMax = () => Math.max(1, scrub.span / ZOOM_MIN_SPAN);
+function setScroll(x) { scrub.progScroll = true; scrubScroll.scrollLeft = x; }
+// zoom to z, keeping time `at` where it is on screen (default: the playhead if visible, else the middle)
+function setZoom(z, at = null) {
+  const V = scrubScroll.clientWidth, W0 = V * scrub.z;
+  if (at == null) {
+    const t = playheadTime(), x = t == null ? -1 : (t - scrub.base) / scrub.span * W0 - scrubScroll.scrollLeft;
+    at = x >= 0 && x <= V ? t : scrub.base + (scrubScroll.scrollLeft + V / 2) / W0 * scrub.span;
+  }
+  const sx = (at - scrub.base) / scrub.span * W0 - scrubScroll.scrollLeft; // its screen position now
+  scrub.z = Math.min(Math.max(1, z), zoomMax());
+  renderScrub();
+  setScroll((at - scrub.base) / scrub.span * V * scrub.z - sx);
+}
+$('#zoom').onclick = e => {
+  const b = e.target.closest('button[data-span]'); if (!b || b.disabled) return;
+  const s = +b.dataset.span;
+  setZoom(s ? scrub.span / Math.max(s, ZOOM_MIN_SPAN) : 1);
+};
+scrubScroll.addEventListener('scroll', () => {
+  if (scrub.progScroll) scrub.progScroll = false;
+  else scrub.userScroll = Date.now(); // the user is looking around: don't pull back to the playhead for a bit
+}, { passive: true });
+// over the bar, the wheel (and a trackpad's pinch or up/down swipe) zooms around the pointer;
+// a sideways swipe or Shift + wheel scrolls it
+const timeAtX = x => { const b = scrubTrack.getBoundingClientRect(); return scrub.base + (x - b.left) / b.width * scrub.span; };
+scrubScroll.addEventListener('wheel', e => {
+  if (e.shiftKey || Math.abs(e.deltaX) >= Math.abs(e.deltaY)) return; // native sideways scroll
+  e.preventDefault();
+  const dy = e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY;           // lines -> pixels (Firefox)
+  setZoom(scrub.z * Math.exp(-Math.max(-120, Math.min(120, dy)) * (e.ctrlKey ? 0.01 : 0.004)), timeAtX(e.clientX));
+}, { passive: false });
+// two-finger pinch on phones
+(() => {
+  let p = null;
+  const dist = t => Math.abs(t[0].clientX - t[1].clientX) || 1;
+  scrubScroll.addEventListener('touchstart', e => {
+    if (e.touches.length !== 2) { p = null; return; }
+    p = { d: dist(e.touches), z: scrub.z, at: timeAtX((e.touches[0].clientX + e.touches[1].clientX) / 2) };
+    scrub.pinch = true;
+  }, { passive: true });
+  scrubScroll.addEventListener('touchmove', e => {
+    if (!p || e.touches.length !== 2) return;
+    e.preventDefault();
+    setZoom(p.z * dist(e.touches) / p.d, p.at);
+  }, { passive: false });
+  const done = e => { if (e.touches.length < 2) { p = null; setTimeout(() => { scrub.pinch = false; }, 0); } };
+  scrubScroll.addEventListener('touchend', done, { passive: true });
+  scrubScroll.addEventListener('touchcancel', done, { passive: true });
+})();
+
+// ---- HD: the camera's 2304x1296 H.265 main stream, recorded from the vendor's cloud by
+// hd_record.py:
+//   <stream>/hd/<day>/<stream>-hd-<epoch>_<day>_<time>.mp4   5-minute clips, kept 3 days
+//   <stream>/hd/live/live.m3u8                               live HLS: the last ~7 minutes
+// For these cameras the player shows only HD; the normal (SD) video isn't loaded at all (SD
+// is still recorded, for people, events and the car). A moment plays from its finished clip,
+// else from the live stream's last minutes; clips play on into the next, the last one into
+// the live stream; the time bar shows where there's HD. H.265 plays in Safari, and in
+// Chrome / Edge where the computer can decode it in hardware.
+const HD_STREAMS = ['cam1'];
+const HD_JOIN = 30;  // seconds: a moment in a gap this short (a cloud reconnect) plays from the next file
+const isHD = s => HD_STREAMS.includes(s);
+const hdVideo = $('#hdVideo');
+// on: the open camera is an HD one. mode: 'clip' (seg playing), 'live' (the live stream),
+// 'none' (no HD at time at). req: the latest request (an older one finishing late is dropped)
+const hd = { on: false, mode: null, seg: null, at: null, hls: null, req: 0, lists: {}, live: null, fetching: false };
+const nextDay = d => new Date(Date.parse(d + 'T12:00:00Z') + 864e5).toISOString().slice(0, 10);
+const liveUrl = stream => fileUrl(`${stream}/hd/live/live.m3u8`);
+async function hdList(stream, day) {
+  const k = stream + '/' + day, c = hd.lists[k];
+  if (c && Date.now() - c.at < 20e3) return c.segs;
+  let segs = [];
+  try {
+    const r = await fetch(`${CFG.fallback}${encodeURIComponent(stream)}/hd/${day}/`, { cache: 'no-store' });
+    if (r.ok) segs = (await r.json()).filter(f => f.type === 'file' && f.name.endsWith('.mp4'))
+      .map(f => ({ start: +(f.name.match(/-hd-(\d+)_/) || [])[1], mtime: Date.parse(f.mtime) / 1000 || 0,
+                   path: `${stream}/hd/${day}/${f.name}` }))
+      .filter(x => x.start).sort((a, b) => a.start - b.start);
+  } catch {}
+  // a clip ends when its file was last written (early, when the cloud link dropped). Clips may
+  // overlap (pieces filled from the SD card overlap the live ones): each keeps its own end
+  segs.forEach(x => x.end = Math.min(x.mtime || x.start + 300, x.start + 310));
+  // the clip being written can't play yet (playback uses the live stream there), but the bar
+  // shows it: from its start to its last write
+  segs = segs.filter(x => x.mtime);
+  for (const x of segs) x.open = x.mtime >= Date.now() / 1000 - 15;
+  hd.lists[k] = { at: Date.now(), segs };
+  return segs;
+}
+// what the live stream covers now: {from, to} (epoch s), from its playlist's PROGRAM-DATE-TIMEs
+async function hdLiveRange(stream) {
+  const c = hd.live;
+  if (c && c.stream === stream && Date.now() - c.at < 10e3) return c;
+  let from = null, to = null;
+  try {
+    const r = await fetch(liveUrl(stream) + '?t=' + Date.now(), { cache: 'no-store' });
+    if (r.ok) {
+      let dur = 0;
+      for (const line of (await r.text()).split('\n')) {
+        if (line.startsWith('#EXTINF:')) dur = parseFloat(line.slice(8)) || 0;
+        else if (line.startsWith('#EXT-X-PROGRAM-DATE-TIME:')) {
+          const t = Date.parse(line.slice(25)) / 1000;
+          if (t) { if (from == null) from = t; to = t + dur; }
+        }
+      }
+    }
+  } catch {}
+  // couldn't read it (the recorder reconnecting, a network blip): keep what was known, so the
+  // bar doesn't shrink for a moment
+  if (from == null && c && c.stream === stream && c.from != null && Date.now() / 1000 - c.to < 300) return Object.assign(c, { at: Date.now() });
+  return hd.live = { stream, from, to, at: Date.now() };
+}
+// the clip with time t (epoch s), looking in the recording's day and the next (past midnight)
+async function hdSegAt(stream, day, t) {
+  for (const d of [day, nextDay(day)]) {
+    const x = (await hdList(stream, d)).find(x => !x.open && t >= x.start && t < x.end);
+    if (x) return x;
+  }
+  return null;
+}
+// the clip after seg (clips end early, and the next starts late, when the cloud link drops)
+async function hdAfter(seg) {
+  const [stream, , day] = seg.path.split('/');
+  for (const d of [day, nextDay(day)]) {
+    const x = (await hdList(stream, d)).find(x => !x.open && x.start > seg.start);
+    if (x) return x;
+  }
+  return null;
+}
+// the time bar: the HD recording files as they are, one block each, from its start to its
+// last write; the file still being written in the live colour (cached lists, fetched in the
+// background, then redrawn)
+function hdMarks(stream, day, base, span) {
+  if (!hd.on) return '';
+  const files = [], stale = c => !c || Date.now() - c.at > 20e3;
+  for (const d of [day, nextDay(day)]) {
+    const c = hd.lists[stream + '/' + d];
+    if (stale(c) && !hd.fetching) { hd.fetching = true; hdList(stream, d).finally(() => { hd.fetching = false; renderScrub(); }); }
+    if (c) files.push(...c.segs);
+  }
+  return files.map(x => {
+    const a = Math.max(x.start, base), b = Math.min(x.open ? x.mtime : x.end, base + span);
+    return b > a ? `<span class="hd${x.open ? ' rec' : ''}" title="${esc(x.path.split('/').pop())}" style="left:${(a - base) / span * 100}%;width:${(b - a) / span * 100}%"></span>` : '';
+  }).join('');
+}
+function hdTime() {
+  if (hd.mode === 'clip' && hd.seg) return hd.seg.start + (hdVideo._seekAt ?? hdVideo.currentTime);
+  if (hd.mode === 'live') {
+    if (hd.rt) return hd.rt.t0 != null && hdVideo.readyState >= 1 ? hd.rt.t0 + hdVideo.currentTime : hd.at;
+    const d = hd.hls?.playingDate || (!hd.hls && hdVideo.getStartDate && hdVideo.readyState >= 1
+      ? new Date(hdVideo.getStartDate().getTime() + hdVideo.currentTime * 1000) : null);
+    return d && !isNaN(d) ? d.getTime() / 1000 : hd.at ?? Date.now() / 1000;
+  }
+  return hd.at;
+}
+// watching the live stream at (about) now: the LIVE badge
+const hdEdge = () => hd.on && hd.mode === 'live' && (hd.rt ? Date.now() - hd.rt.last < 6000 : hdTime() > Date.now() / 1000 - 60);
+// is the camera's live HD stream there now? (the real-time relay sent something in the last
+// few seconds, or the live playlist was added to in the last two minutes: its pieces run up to
+// a camera keyframe apart, ~48 s)
+function hdLiveAvailable(stream) {
+  if (hd.rt?.stream === stream && hd.rt.sb && Date.now() - hd.rt.last < 6000) return true;
+  const lv = hd.live;
+  return !!(lv && lv.stream === stream && lv.to && Date.now() / 1000 - lv.to < 120);
+}
+// while an HD camera is open: look again every 15 s (the LIVE button, the bar's HD strip)
+setInterval(() => {
+  const cur = hd.on && ALL.find(x => x.file === currentFile);
+  if (cur && modal.classList.contains('open')) hdLiveRange(cur.stream).then(() => { updateGoLive(); renderScrub(); });
+}, 15000);
+function hdStopLive() {
+  hdRtStop();
+  if (hd.hls) { hd.hls.destroy(); hd.hls = null; }
+  if (hdVideo.dataset.path?.endsWith('.m3u8')) { hdVideo.removeAttribute('src'); hdVideo.load(); delete hdVideo.dataset.path; }
+}
+// show the picture (and its tag, download, badge)
+function hdShown() {
+  hdVideo.hidden = false; $('#hdNone').hidden = true;
+  hdVideo.playbackRate = speed;
+  hdVideo.play().catch(() => {});
+  hdUpdate();
+}
+function hdMessage(html) {
+  hdStopLive(); hdVideo.pause(); hdVideo.hidden = true;
+  $('#hdNone').innerHTML = html; $('#hdNone').hidden = false;
+  hdUpdate();
+}
+// show time t (epoch s; null: live)
+async function hdShowAt(t) {
+  const r = ALL.find(x => x.file === currentFile); if (!r || !isHD(r.stream)) return;
+  const req = ++hd.req;
+  if (t != null && t < Date.now() / 1000 - 25) {
+    const seg = await hdSegAt(r.stream, r.day, t);
+    if (req !== hd.req) return;
+    if (seg) return hdClip(seg, t - seg.start);
+    // in a reconnect gap (shown as covered on the bar): the next clip, from its start
+    const next = await hdAfter({ path: `${r.stream}/hd/${r.day}/`, start: t });
+    if (req !== hd.req) return;
+    if (next && next.start > t && next.start - t <= HD_JOIN) return hdClip(next, 0);
+  }
+  const lv = await hdLiveRange(r.stream);
+  if (req !== hd.req) return;
+  if (lv.from != null && (t == null || t >= lv.from - 2)) return hdLive(r.stream, t != null && t < lv.to - 25 ? t : null);
+  hd.mode = 'none'; hd.seg = null; hd.at = t ?? Date.now() / 1000;
+  if (t == null || t > Date.now() / 1000 - 60) {
+    // live wanted, but the recorder is reconnecting to the camera's cloud (it drops now and
+    // then; back in about half a minute): try again for a while
+    hd.waitSince = hd.waitSince || Date.now();
+    if (Date.now() - hd.waitSince < 120e3) {
+      hdMessage(`<b>Connecting to the HD stream…</b>The camera's cloud link dropped; it usually comes back within a minute.`);
+      setTimeout(() => { if (req === hd.req) { hd.live = null; hdShowAt(null); } }, 5000);
+      return;
+    }
+    hd.waitSince = 0;
+    return hdMessage(`<b>The HD stream is down</b>The camera's cloud link hasn't come back for 2 minutes. Earlier HD still plays: pick a moment on the blue parts of the bar.`);
+  }
+  hdMessage(`<b>No HD video here</b>HD is recorded since 2 Oct, 8 pm and kept for 3 days; it has short gaps when the camera's cloud link drops. Pick a moment on the blue parts of the bar.`);
+  movePlayhead();
+}
+function hdClip(seg, at) {
+  hdStopLive();
+  hd.mode = 'clip'; hd.seg = seg; hd.at = null;
+  if (hdVideo.dataset.path !== seg.path) { hdVideo._seekAt = at; hdVideo.src = fileUrl(seg.path); hdVideo.dataset.path = seg.path; }
+  else if (hdVideo.readyState < 1) hdVideo._seekAt = at;
+  else if (at > hdVideo.duration - .5) return hdNext();  // in the gap after it
+  else hdVideo.currentTime = at;
+  hdShown();
+}
+// ---- live with no delay: hd_source.js sends the frames as they arrive, as fragmented MP4
+// over a WebSocket (/api/hd-live/<stream>): first {"t0", "audio"}, then the init segment,
+// then a fragment per frame, starting from the last key frame. They're played here with Media
+// Source Extensions in the HD video element (sound and controls as usual), kept a moment
+// behind the newest frame. Browsers whose MSE can't play H.265 get the HLS live stream
+// (~30 s behind) instead.
+const HD_MIME = audio => `video/mp4; codecs="hvc1.1.6.L150.90${audio ? ', mp4a.40.2' : ''}"`;
+const hdRtOk = () => !!window.MediaSource && MediaSource.isTypeSupported(HD_MIME(true));
+// (on a local test page the relay runs on a port of its own)
+const hdWsUrl = stream => location.hostname === 'localhost' ? 'ws://localhost:8798/'
+  : `${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/hd-live/${encodeURIComponent(stream)}`;
+const RT_BEHIND = 0.4;  // seconds behind the newest frame it plays at (smooths the network)
+function hdRtStart(stream) {
+  hdRtStop();
+  const rt = hd.rt = { stream, t0: null, sb: null, queue: [], last: Date.now(), quiet: false };
+  hd.rtFirst ||= Date.now();  // when this page first tried (reconnects don't reset it)
+  const ms = rt.ms = new MediaSource();
+  hdVideo.removeAttribute('src'); delete hdVideo.dataset.path;
+  hdVideo.src = rt.url = URL.createObjectURL(ms);
+  hdVideo.dataset.path = 'rt';
+  const pump = () => {
+    if (hd.rt !== rt || !rt.sb || rt.sb.updating || !rt.queue.length) return;
+    const parts = rt.queue.splice(0), all = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
+    let o = 0; for (const p of parts) { all.set(new Uint8Array(p), o); o += p.byteLength; }
+    try { rt.sb.appendBuffer(all); } catch { restart(); }
+  };
+  // keep playing close behind the newest frame; drop what's long played
+  const follow = () => {
+    if (hd.rt !== rt || !rt.sb || rt.sb.updating) return;
+    const b = hdVideo.buffered; if (!b.length) return;
+    const end = b.end(b.length - 1);
+    if (!hdVideo.paused || hdVideo.readyState < 2) {
+      if (end - hdVideo.currentTime > 2.5 || hdVideo.currentTime < b.start(b.length - 1)) hdVideo.currentTime = Math.max(b.start(b.length - 1), end - RT_BEHIND);
+      else hdVideo.playbackRate = end - hdVideo.currentTime > 1 ? 1.1 : 1;  // catch up gently
+    }
+    if (hdVideo.currentTime - b.start(0) > 90) { try { rt.sb.remove(b.start(0), hdVideo.currentTime - 60); } catch {} }
+  };
+  const restart = () => { if (hd.rt === rt) setTimeout(() => hd.rt === rt && hd.mode === 'live' && hdRtStart(stream), 2000); };
+  ms.addEventListener('sourceopen', () => {
+    const ws = rt.ws = new WebSocket(hdWsUrl(stream));
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = e => {
+      if (hd.rt !== rt) return;
+      rt.last = Date.now();
+      if (typeof e.data === 'string') {  // a new stream (also after the relay restarted)
+        const h = JSON.parse(e.data);
+        hd.rtEver = true;  // the relay can be reached from here
+        if (rt.sb) return restart();     // a different timeline: start over
+        rt.t0 = h.t0;
+        try { rt.sb = ms.addSourceBuffer(HD_MIME(false)); } catch { return hdRtFail(); }
+        rt.sb.mode = 'segments';
+        rt.sb.addEventListener('updateend', () => { follow(); pump(); });
+        return;
+      }
+      const kind = new Uint8Array(e.data, 0, 1)[0], data = e.data.slice(1);
+      if (kind === 1) return hdRtSound(rt, data);  // the sound: a track of its own
+      rt.queue.push(data);
+      pump();
+    };
+    // the relay restarts with the recorder (the camera's cloud link drops now and then): retry
+    ws.onclose = restart;
+  }, { once: true });
+  rt.timer = setInterval(() => {
+    if (hd.rt !== rt) return;
+    const quiet = Date.now() - rt.last > 6000;  // the cloud link dropped (it comes back by itself)
+    if (quiet !== rt.quiet) {
+      rt.quiet = quiet;
+      $('#hdNone').innerHTML = `<b>Connecting to the HD stream…</b>The camera's cloud link dropped; it usually comes back within a minute.`;
+      $('#hdNone').hidden = !quiet;
+    }
+    if (quiet && Date.now() - rt.last > 20000) { rt.last = Date.now(); hdRtStart(stream); }  // try afresh
+    // never reached the relay in 10 s (WebSockets blocked on the way?) or data but no picture
+    // (this browser can't play it): use the HLS live stream instead. (Once it has worked, a
+    // drop is the camera's cloud link: keep trying.)
+    if (!hd.rtEver && Date.now() - hd.rtFirst > 10000) return hdRtFail();
+    if (rt.sb && hdVideo.readyState < 2) { if ((rt.stuck = (rt.stuck || 0) + 1) > 8) hdRtFail(); } else rt.stuck = 0;
+  }, 1000);
+  hdShown();
+}
+// live sound: its own track, played in a hidden audio element of its own (so sound that's late
+// or missing never holds the picture back), kept close behind its newest sound like the picture,
+// and following the video's play / pause / volume / mute
+const hdAudioEl = $('#hdAudioEl');
+function hdRtSound(rt, data) {
+  let a = rt.a;
+  // a new init segment (the relay's sound restarted) starts the sound afresh
+  if (a && new Uint8Array(data, 4, 4).every((c, i) => c === 'ftyp'.charCodeAt(i))) { hdRtSoundStop(rt); a = null; }
+  if (!a) {
+    if (!window.MediaSource || !MediaSource.isTypeSupported('audio/mp4; codecs="mp4a.40.2"')) return;
+    a = rt.a = { ms: new MediaSource(), sb: null, queue: [] };
+    hdAudioEl.src = a.url = URL.createObjectURL(a.ms);
+    a.ms.addEventListener('sourceopen', () => {
+      try { a.sb = a.ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"'); } catch { return; }
+      a.sb.addEventListener('updateend', () => { soundFollow(); a.pump(); });
+      a.pump();
+    }, { once: true });
+    a.pump = () => {
+      if (rt.a !== a || !a.sb || a.sb.updating || !a.queue.length) return;
+      const parts = a.queue.splice(0), all = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
+      let o = 0; for (const p of parts) { all.set(new Uint8Array(p), o); o += p.byteLength; }
+      try { a.sb.appendBuffer(all); } catch { hdRtSoundStop(rt); }
+    };
+    const soundFollow = () => {
+      const b = hdAudioEl.buffered; if (!b.length) return;
+      const end = b.end(b.length - 1);
+      if (end - hdAudioEl.currentTime > 1.5 || hdAudioEl.currentTime < b.start(b.length - 1)) hdAudioEl.currentTime = Math.max(b.start(b.length - 1), end - 0.3);
+      if (hdAudioEl.currentTime - b.start(0) > 90) { try { a.sb.remove(b.start(0), hdAudioEl.currentTime - 60); } catch {} }
+      hdSoundSync();
+    };
+  }
+  a.queue.push(data);
+  a.pump();
+}
+function hdRtSoundStop(rt) {
+  const a = rt.a; if (!a) return;
+  rt.a = null;
+  hdAudioEl.pause(); hdAudioEl.removeAttribute('src'); hdAudioEl.load();
+  $('#hdSound').hidden = true;
+  URL.revokeObjectURL(a.url);
+}
+// the sound does what the picture does; on / off is the sound button's (remembered)
+let hdSoundOn = true;
+try { hdSoundOn = localStorage.getItem('hdSound') !== 'off'; } catch {}
+function hdSoundSync() {
+  hdAudioEl.muted = !hdSoundOn; hdAudioEl.volume = hdVideo.volume;
+  if (hd.rt?.a) {
+    if (hdVideo.paused) hdAudioEl.pause();
+    else if (hdAudioEl.paused && hdAudioEl.readyState >= 2) hdAudioEl.play().catch(() => {});  // may need a tap first
+  }
+  hdSoundButton();
+}
+function hdSoundButton() {
+  const b = $('#hdSound'), a = hd.rt?.a;
+  b.hidden = !a;
+  if (!a) return;
+  const blocked = hdSoundOn && hdAudioEl.paused && !hdVideo.paused;  // the browser wants a tap first
+  const off = !hdSoundOn || blocked;
+  b.innerHTML = off
+    ? '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>'
+    : '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11"/></svg>';
+  b.classList.toggle('tap', blocked);
+  const label = !hdSoundOn ? 'Turn the sound on' : blocked ? 'Tap for sound' : 'Turn the sound off';
+  b.title = label; b.setAttribute('aria-label', label);
+}
+$('#hdSound').onclick = e => {
+  e.stopPropagation();
+  if (hdSoundOn && hdAudioEl.paused && !hdVideo.paused) hdAudioEl.play().catch(() => {}).finally(hdSoundButton);
+  else { hdSoundOn = !hdSoundOn; try { localStorage.setItem('hdSound', hdSoundOn ? 'on' : 'off'); } catch {} }
+  hdSoundSync();
+};
+for (const e of ['playing', 'pause']) hdAudioEl.addEventListener(e, hdSoundButton);
+for (const e of ['play', 'pause', 'volumechange']) hdVideo.addEventListener(e, hdSoundSync);
+// browsers allow sound only after a tap: any tap in the page lets it start
+document.addEventListener('pointerdown', () => { if (hd.rt?.a && !hdVideo.paused && hdAudioEl.paused) hdAudioEl.play().catch(() => {}); });
+
+function hdRtStop() {
+  const rt = hd.rt; if (!rt) return;
+  hd.rt = null;
+  hdRtSoundStop(rt);
+  clearInterval(rt.timer);
+  if (rt.ws) { rt.ws.onclose = null; rt.ws.close(); }
+  if (hdVideo.dataset.path === 'rt') { hdVideo.removeAttribute('src'); hdVideo.load(); delete hdVideo.dataset.path; }
+  URL.revokeObjectURL(rt.url);
+  hdVideo.playbackRate = speed;
+}
+function hdRtFail() { hdRtStop(); hdOkRt = false; hdShowAt(null); }  // this browser: HLS from now on
+let hdOkRt = null;
+// playing again after a pause: back to now
+hdVideo.addEventListener('play', () => {
+  const rt = hd.rt, b = hdVideo.buffered;
+  if (rt && b.length && b.end(b.length - 1) - hdVideo.currentTime > 2.5) hdVideo.currentTime = b.end(b.length - 1) - RT_BEHIND;
+});
+
+// the live stream, at time t (null: its live edge)
+async function hdLive(stream, t) {
+  const url = liveUrl(stream);
+  hd.waitSince = 0;
+  if (t == null && (hdOkRt ??= hdRtOk())) {  // the edge: frames as they come
+    hd.mode = 'live'; hd.seg = null; hd.at = Date.now() / 1000;
+    if (hd.rt?.stream === stream) { hdVideo.play().catch(() => {}); return; }
+    hdStopLive();
+    return hdRtStart(stream);
+  }
+  hd.mode = 'live'; hd.seg = null; hd.at = t ?? Date.now() / 1000;
+  if (hdVideo.dataset.path === url && (hd.hls || hdVideo.readyState >= 1)) { hdSeekLive(t); hdShown(); return; }
+  hdStopLive();
+  hdVideo.removeAttribute('src'); delete hdVideo.dataset.path; hdVideo._seekAt = null;
+  for (const src of CFG.hlsJs) { if (window.Hls) break; await loadScript(src).catch(() => {}); }
+  if (hd.mode !== 'live') return;
+  hdVideo.dataset.path = url;
+  if (window.Hls && Hls.isSupported()) {
+    const h = hd.hls = new Hls({
+      // a piece per camera keyframe, i.e. ~10 s: three behind the edge plays without stalling
+      autoStartLoad: false, liveSyncDurationCount: 3, maxBufferLength: 40,
+      // the playlist changes every ~10 s: never a cached copy
+      xhrSetup: (xhr, u) => { if (u.includes('.m3u8')) xhr.open('GET', u + (u.includes('?') ? '&' : '?') + 't=' + Date.now(), true); },
+    });
+    h.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal || hd.hls !== h) return;
+      if (d.type === Hls.ErrorTypes.NETWORK_ERROR) setTimeout(() => hd.hls === h && h.startLoad(), 3000);
+      else if (d.type === Hls.ErrorTypes.MEDIA_ERROR) h.recoverMediaError();
+      else hdCantPlay();
+    });
+    // start where asked: the playlist's times give the position of time t
+    h.once(Hls.Events.LEVEL_LOADED, (_, d) => {
+      const f = d.details.fragments[0];
+      h.startLoad(hd.at != null && hd.at < Date.now() / 1000 - 25 && f?.programDateTime
+        ? Math.max(f.start, f.start + hd.at - f.programDateTime / 1000) : -1);
+    });
+    h.loadSource(url); h.attachMedia(hdVideo);
+  } else {
+    hdVideo.src = url;   // native HLS (older iPhones)
+    hdVideo._liveAt = t;
+  }
+  hdShown();
+}
+function hdSeekLive(t) {
+  if (t == null) {  // the live edge
+    const p = hd.hls ? hd.hls.liveSyncPosition : (hdVideo.seekable.length ? hdVideo.seekable.end(hdVideo.seekable.length - 1) - 5 : null);
+    if (p != null) hdVideo.currentTime = p;
+    return;
+  }
+  if (hd.hls) {
+    const f = hd.hls.levels?.[Math.max(0, hd.hls.currentLevel)]?.details?.fragments?.[0];
+    if (f?.programDateTime) hdVideo.currentTime = Math.max(f.start, f.start + t - f.programDateTime / 1000);
+  } else if (hdVideo.getStartDate) {
+    const s0 = hdVideo.getStartDate().getTime() / 1000;
+    if (s0) hdVideo.currentTime = Math.max(0, t - s0);
+  }
+}
+async function hdNext() {
+  if (hd.mode !== 'clip') return;
+  const seg = hd.seg, x = await hdAfter(seg);
+  if (hd.seg !== seg) return;
+  if (x) return hdClip(x, 0);
+  hdShowAt(seg.start + (hdVideo.duration || 0) + .5);  // the newest clip: carry on in the live stream
+}
+const hdPlayable = () => ['hvc1', 'hev1'].some(c => hdVideo.canPlayType(`video/mp4; codecs="${c}.1.6.L150.B0"`));
+function hdCantPlay() {
+  hd.mode = 'none'; hd.at = hdTime();
+  hdMessage(`<b>This browser can't play the HD video</b>It's H.265. Safari plays it, and Chrome or Edge on computers and phones that decode H.265 in hardware.`);
+}
+// the HD tag, the download button (the HD clip) and the live badge
+function hdUpdate() {
+  const r = ALL.find(x => x.file === currentFile);
+  $('#pHD').hidden = !r || !isHD(r.stream);
+  if (hd.on) {
+    const clip = hd.mode === 'clip' && hd.seg;
+    $('#pDownload').style.display = clip ? '' : 'none';
+    if (clip) { $('#pDownload').href = fileUrl(clip.path); $('#pDownload').setAttribute('download', clip.path.split('/').pop()); }
+    $('#pDownload').title = 'Download this HD clip (up to 5 minutes)';
+  }
+  updateGoLive();
+}
+// leave HD (another camera, or the player closed)
+function hdOff() {
+  hd.req++;
+  hdStopLive();
+  hdVideo.pause(); hdVideo.hidden = true; $('#hdNone').hidden = true;
+  hd.on = false; hd.mode = null; hd.seg = null; hd.at = null;
+  $('#scrubSegs').classList.remove('hdmode');
+}
+$('#pHD').onclick = () => toast('HD: the camera’s full 2304×1296 picture (H.265), from its cloud.');
+hdVideo.addEventListener('loadedmetadata', () => {
+  if (hd.mode === 'live' && hdVideo._liveAt !== undefined) { const t = hdVideo._liveAt; delete hdVideo._liveAt; hdSeekLive(t); return; }
+  const at = hdVideo._seekAt; hdVideo._seekAt = null;
+  if (at == null || hd.mode !== 'clip') return;
+  if (at > hdVideo.duration - .5) return hdNext();  // in a gap after a clip that ended early
+  hdVideo.currentTime = at;
+});
+hdVideo.addEventListener('timeupdate', () => { if (hd.on && !scrub.drag) movePlayhead(); if (hd.on) updateGoLive(); });
+hdVideo.addEventListener('ended', () => {
+  if (hd.mode === 'clip') hdNext();
+  else if (hd.mode === 'live') hdShowAt(hdTime() + 1);  // the recorder restarted: carry on
+});
+hdVideo.addEventListener('error', () => {
+  if (hd.rt) return hdRtFail();  // the real-time view doesn't work in this browser: HLS instead
+  if (!hd.on || hd.mode !== 'clip') return;
+  if (!hdPlayable()) return hdCantPlay();
+  toast('This HD clip is damaged (the recorder was stopped while writing it); skipping to the next.');
+  hdNext();
+});
+
+// ---- zoom: double-tap (or double-click) the picture to zoom in there, again to zoom out.
+// While zoomed: drag to look around, pinch (or pinch on a trackpad) for more or less, tap to
+// pause / play. The videos' own controls hide meanwhile (they'd be zoomed along).
+// Both videos get the same view, so switching HD on or off keeps it.
+const zoom = { z: 1, x: 0, y: 0 };  // scale, and the picture's offset (px, in the SD video's box)
+const ZOOM_IN = 2.5, ZOOM_MAX = 6;
+const vwrap = $('#vwrap');
+function zoomApply() {
+  const W = video.clientWidth, H = video.clientHeight, L = video.offsetLeft, T = video.offsetTop;
+  zoom.z = Math.min(ZOOM_MAX, Math.max(1, zoom.z));
+  if (zoom.z < 1.02) zoom.z = 1;
+  zoom.x = Math.min(0, Math.max(W - W * zoom.z, zoom.x));
+  zoom.y = Math.min(0, Math.max(H - H * zoom.z, zoom.y));
+  const on = zoom.z > 1;
+  video.style.transform = on ? `translate(${zoom.x}px,${zoom.y}px) scale(${zoom.z})` : '';
+  // hdVideo's box is the whole frame (from its left edge, not the SD video's)
+  hdVideo.style.transform = on ? `translate(${zoom.x + L * (1 - zoom.z)}px,${zoom.y + T * (1 - zoom.z)}px) scale(${zoom.z})` : '';
+  
+  vwrap.classList.toggle('zoomed', on);
+  $('#zoomPill').hidden = !on;
+  $('#zoomPill').textContent = `${zoom.z.toFixed(1)}× · zoom out`;
+}
+// zoom to z, keeping the picture's point under (px, py) (px in the SD video's box) where it is
+function zoomAt(z, px, py) {
+  z = Math.min(ZOOM_MAX, Math.max(1, z));
+  zoom.x = px - (px - zoom.x) * z / zoom.z;
+  zoom.y = py - (py - zoom.y) * z / zoom.z;
+  zoom.z = z;
+  zoomApply();
+}
+function zoomOut() { zoom.z = 1; zoom.x = zoom.y = 0; zoomApply(); }
+$('#zoomPill').onclick = zoomOut;
+window.addEventListener('resize', zoomApply);  // keep the view in the frame (phones resize on scrolling)
+document.addEventListener('fullscreenchange', zoomOut);
+(() => {
+  const ptrs = new Map();  // pointers down on the picture
+  let start = null, pinch = null, moved = false, last = null, tapTimer = 0;
+  const local = e => { const r = vwrap.getBoundingClientRect(); return { x: e.clientX - r.left - video.offsetLeft, y: e.clientY - r.top - video.offsetTop }; };
+  const shown = () => hd.on ? hdVideo : video;
+  vwrap.addEventListener('pointerdown', e => {
+    if (e.button || e.target.closest('#zoomPill, #hdSound') || video.hidden) return;
+    ptrs.set(e.pointerId, local(e));
+    if (ptrs.size === 2) {
+      const [a, b] = [...ptrs.values()];
+      pinch = { d: Math.hypot(a.x - b.x, a.y - b.y) || 1, z: zoom.z };
+      moved = true;
+    } else { start = { ...local(e), zx: zoom.x, zy: zoom.y }; moved = false; }
+    if (zoom.z > 1 || ptrs.size === 2) { vwrap.setPointerCapture(e.pointerId); e.preventDefault(); }
+  });
+  vwrap.addEventListener('pointermove', e => {
+    if (!ptrs.has(e.pointerId)) return;
+    const p = local(e); ptrs.set(e.pointerId, p);
+    if (ptrs.size === 2 && pinch) {
+      const [a, b] = [...ptrs.values()];
+      zoomAt(pinch.z * Math.hypot(a.x - b.x, a.y - b.y) / pinch.d, (a.x + b.x) / 2, (a.y + b.y) / 2);
+    } else if (start) {
+      if (Math.hypot(p.x - start.x, p.y - start.y) > 8) moved = true;
+      if (zoom.z > 1 && moved) { zoom.x = start.zx + p.x - start.x; zoom.y = start.zy + p.y - start.y; zoomApply(); }
+    }
+  });
+  const up = e => {
+    if (!ptrs.delete(e.pointerId)) return;
+    if (ptrs.size) return;           // the other finger of a pinch is still down
+    pinch = null;
+    if (moved || !start) { start = null; return; }
+    const p = local(e), now = performance.now();
+    if (last && now - last.t < 320 && Math.hypot(p.x - last.x, p.y - last.y) < 40) {  // double tap
+      clearTimeout(tapTimer); last = null;
+      if (zoom.z > 1) zoomOut(); else zoomAt(ZOOM_IN, p.x, p.y);
+    } else {
+      last = { ...p, t: now };
+      // zoomed, the controls are hidden: a single tap pauses / plays
+      if (zoom.z > 1) tapTimer = setTimeout(() => { const v = shown(); v.paused ? v.play().catch(() => {}) : v.pause(); }, 320);
+    }
+    start = null;
+  };
+  vwrap.addEventListener('pointerup', up);
+  vwrap.addEventListener('pointercancel', e => { ptrs.delete(e.pointerId); pinch = null; start = null; });
+  // the browser's own double-click action on a video (full screen) would fight the zoom
+  vwrap.addEventListener('dblclick', e => e.preventDefault());
+  // pinch on a trackpad (a scroll with ctrl) zooms around the pointer
+  vwrap.addEventListener('wheel', e => {
+    if (!e.ctrlKey || video.hidden) return;
+    e.preventDefault();
+    const p = local(e);
+    zoomAt(zoom.z * Math.exp(-e.deltaY / 100), p.x, p.y);
+  }, { passive: false });
+})();
+
+function playheadTime() {
+  if (hd.on) return hdTime();
+  const r = ALL.find(x => x.file === currentFile); if (!r) return null;
+  if (unfinished(r)) {
+    // loading the recording copy to rewind: show where we're going, not "now"
+    if (video._liveSeek != null) return Math.min(Math.max(video._liveSeek, r.start), r.start + r.dur);
+    const o = video.readyState >= 1 ? recOffset() : null;
+    return o != null ? Math.min(o + video.currentTime, r.start + r.dur) : r.start + r.dur;
+  }
+  if (video.dataset.file !== r.file) return r.start;
+  // a new file is loading: show where we're going, not its start
+  return r.start + (video._seekAt ?? video.currentTime ?? 0);
+}
+function movePlayhead(t = playheadTime(), dragging = false) {
+  if (t == null || !scrub.span) return;
+  $('#scrubPh').style.left = Math.min(100, Math.max(0, (t - scrub.base) / scrub.span * 100)) + '%';
+  if (scrub.z > 1 && !dragging && Date.now() - scrub.userScroll > 8000) {
+    // keep the playhead in view while zoomed (unless the user just scrolled away)
+    const V = scrubScroll.clientWidth, x = (t - scrub.base) / scrub.span * V * scrub.z;
+    if (x < scrubScroll.scrollLeft || x > scrubScroll.scrollLeft + V * .9) setScroll(x - V * .2);
+  }
+  const r = dragging && recAt(scrub.recs, t);
+  const inGap = r && (t < r.start || t >= r.start + Math.max(r.dur, 1));
+  $('#scrubTime').innerHTML = `<b>${esc(camName(ALL.find(x => x.file === currentFile)?.stream || ''))}</b>${inGap ? ' <span class="gap">no recording</span>' : ''}`;
+  $('#vClock').textContent = new Date(t * 1000).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit', hour12: true });
+}
+video.addEventListener('timeupdate', () => { if (!scrub.drag) movePlayhead(); updateGoLive(); });
+
+function seekAbs(t) {
+  if (hd.on) { scrub.userScroll = 0; hdShowAt(t); movePlayhead(t); return; }
+  const r = recAt(scrub.recs, t); if (!r) return;
+  scrub.userScroll = 0; // follow the playhead to where we're going
+  if (unfinished(r)) return openLiveAt(r, t);
+  const at = r.status === 'recording' ? null : clampOff(r, t);
+  if (r.file === currentFile) {
+    if (at != null && !video.hidden && video.readyState >= 1) video.currentTime = at;
+    return;
+  }
+  const i = visible.findIndex(x => x.file === r.file);
+  if (i >= 0) openPlayer(i, at);
+}
+
+// open (or stay in) the recording in progress at t; t near now shows live
+function openLiveAt(r, t) {
+  const back = r.status !== 'recording' || t < Date.now() / 1000 - 20;
+  if (r.file !== currentFile) {
+    const i = visible.findIndex(x => x.file === r.file); if (i < 0) return;
+    openPlayer(i, back ? t : null, back ? 'rec' : 'live');
+  } else if (back) liveSeek(t);
+  if (!back) goLive();
+  movePlayhead();
+}
+
+// the event bar: ‹ Previous · what to jump between (motion / people / pets) · where we are · Next ›
+// where each event is jumped to: its start, or (a person picked) when they came into view
+function eventsList() {
+  const point = m => !state.who || m.seen[state.who] == null ? m.s
+    : inViewOf(m, state.who)?.[0] ?? Math.max(m.s, m.r.start + m.seen[state.who] - 1);
+  return scrub.recs.flatMap(motionOf).filter(m => isKind(m, scrub.kind)).map(m => ({ m, at: point(m) }))
+    .sort((a, b) => a.at - b.at);
+}
+function renderMoNav() {
+  const n = k => kindCount(scrub.recs, k);
+  // People by default, Pets when there are any; one picked person: just their sightings
+  const kinds = state.who ? ['person'] : ['person', 'pet'].filter(n);
+  if (!kinds.includes(scrub.kind)) scrub.kind = kinds[0] || 'person';
+  const bar = $('#moNav');
+  bar.hidden = !kinds.length || !n(scrub.kind);
+  bar.className = `evbar ${scrub.kind}`;
+  const name = k => k === 'person' ? (state.who ? 'Sightings' : 'People') : 'Pets';
+  const html = kinds.map(k => `<button data-k="${k}" class="${k === scrub.kind ? 'on' : ''}" aria-pressed="${k === scrub.kind}">${name(k)}<b>${n(k)}</b></button>`).join('');
+  if ($('#moKinds').innerHTML !== html) $('#moKinds').innerHTML = html;
+  renderMoPos();
+}
+// "3 of 41" when the playhead is in (or just at) an event, else "between 3 and 4 of 41"
+function renderMoPos() {
+  const el = $('#moPos'); if ($('#moNav').hidden) return;
+  const ev = eventsList(), t = playheadTime();
+  const what = n => state.who ? 'sighting' + (n === 1 ? '' : 's') : KIND[scrub.kind][n === 1 ? 0 : 1];
+  let txt;
+  if (!ev.length || t == null) txt = `no ${what(0)}`;
+  else {
+    const i = ev.findIndex(x => x.at > t + 1);         // the next one
+    const cur = (i < 0 ? ev.length : i) - 1;            // the last one started
+    const inside = cur >= 0 && (t <= ev[cur].m.e + 1 || t - ev[cur].at < 4);
+    const v = inside && state.who && inViewOf(ev[cur].m, state.who);
+    txt = inside ? `<b>${cur + 1}</b> of ${ev.length}` + (v ? ` · ${inViewText(v)}` : '')
+      : cur < 0 ? `${ev.length} ${what(ev.length)} · first at ${fmtTime(new Date(ev[0].at * 1000))}`
+      : i < 0 ? `after the last of ${ev.length}`
+      : `between <b>${cur + 1}</b> and <b>${cur + 2}</b> of ${ev.length}`;
+  }
+  if (el.innerHTML !== txt) el.innerHTML = txt;
+}
+video.addEventListener('timeupdate', renderMoPos);
+$('#moKinds').onclick = e => {
+  const b = e.target.closest('button[data-k]'); if (!b) return;
+  scrub.kind = b.dataset.k;
+  renderScrub();
+};
+
+function jumpMotion(d) {
+  const t = playheadTime(); if (t == null) return;
+  const ev = eventsList();
+  // "previous" skips the event we're in if we're more than a few seconds into it
+  const target = d > 0 ? ev.find(x => x.at > t + 1) : ev.filter(x => x.at < t - 3).pop();
+  const what = state.who ? 'sightings' : KIND[scrub.kind][1];
+  if (!target) { toast(d > 0 ? `No later ${what} on this day` : `No earlier ${what} on this day`); return; }
+  seekAbs(target.at + .05);
+  movePlayhead(target.at);
+  renderMoPos();
+}
+$('#moPrev').onclick = () => jumpMotion(-1);
+$('#goLive').onclick = goLive;
+$('#moNext').onclick = () => jumpMotion(1);
+
+(() => {
+  let lastT = null;
+  const tAt = e => {
+    const b = scrubTrack.getBoundingClientRect();
+    return scrub.base + Math.min(1, Math.max(0, (e.clientX - b.left) / b.width)) * scrub.span;
+  };
+  const move = e => {
+    lastT = tAt(e);
+    movePlayhead(lastT, true);
+    // scrub live inside the file that is already loaded; other files load on release
+    const r = recAt(scrub.recs, lastT);
+    if (r && r.file === currentFile && r.status !== 'recording' && !video.hidden && video.readyState >= 1) video.currentTime = clampOff(r, lastT);
+  };
+  const end = () => {
+    if (!scrub.drag) return;
+    scrub.drag = false; scrubTrack.classList.remove('dragging');
+    if (lastT != null) seekAbs(lastT);
+    lastT = null; renderScrub();
+  };
+  let tap = null; // zoomed touch: a tap jumps, a swipe is left to the browser to scroll the bar
+  const down = new Set();
+  scrubTrack.addEventListener('pointerdown', e => {
+    down.add(e.pointerId);
+    if (down.size > 1) { tap = null; scrub.drag = false; lastT = null; scrubTrack.classList.remove('dragging'); renderScrub(); return; } // a pinch
+    if (!scrub.recs.length) return;
+    if (e.pointerType === 'touch' && scrub.z > 1 && !e.target.closest('.scrub-ph')) {
+      tap = { x: e.clientX, y: e.clientY, id: e.pointerId };
+      return;
+    }
+    scrub.drag = true; scrubTrack.classList.add('dragging');
+    try { scrubTrack.setPointerCapture(e.pointerId); } catch {}
+    move(e);
+  });
+  scrubTrack.addEventListener('pointermove', e => { if (scrub.drag) move(e); });
+  scrubTrack.addEventListener('pointerup', e => {
+    down.delete(e.pointerId);
+    if (tap && tap.id === e.pointerId && Math.hypot(e.clientX - tap.x, e.clientY - tap.y) < 10) seekAbs(tAt(e));
+    tap = null;
+    end();
+  });
+  scrubTrack.addEventListener('pointercancel', e => { down.delete(e.pointerId); tap = null; end(); }); // a swipe that became a scroll
+})();
+
+function closePlayer(fromPop) {
+  if (!fromPop && history.state?.player) { history.back(); return; } // popstate finishes the close
+  modal.classList.remove('open'); modal.setAttribute('aria-hidden', 'true');
+  document.body.style.overflow = '';
+  video.pause();
+  hdOff();
+  stopLive();
+  if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
+  zoomOut();
+  currentFile = null;
+  state.who = ''; pick = null; naming = false;  // people are per camera
+  if (location.hash) history.replaceState(null, '', location.pathname + location.search);
+  homeResume();
+}
+window.addEventListener('popstate', () => {
+  if (modal.classList.contains('open') && !history.state?.player) closePlayer(true);
+});
+
+function step(d) {
+  const i = visible.findIndex(r => r.file === currentFile);
+  if (i >= 0 && visible[i + d]) openPlayer(i + d);
+}
+
+function openFromHash() {
+  const m = location.hash.match(/^#(play|live)=(.+)$/);
+  if (!m) return;
+  const v = decodeURIComponent(m[2]);
+  const i = m[1] === 'live'
+    ? visible.findIndex(r => r.status === 'recording' && r.stream === v)
+    : visible.findIndex(r => r.file === v);
+  if (i >= 0) openPlayer(i);
+  else toast(m[1] === 'live' ? `${v} is not live right now` : 'That recording is no longer available');
+}
+
+video.addEventListener('loadedmetadata', () => {
+  if (video._seekAt != null) { video.currentTime = video._seekAt; video._seekAt = null; }
+  const r = ALL.find(x => x.file === video.dataset.file);
+  if (r && !r.dur && isFinite(video.duration)) {
+    r.dur = video.duration; r.endD = new Date((r.start + r.dur) * 1000);
+    refreshPlayerMeta();
+  }
+});
+// play straight on into the next file of the same stream when it follows on (recordings are split)
+video.addEventListener('ended', () => {
+  const cur = ALL.find(x => x.file === currentFile); if (!cur) return;
+  const next = ALL.filter(r => r.stream === cur.stream && r.start > cur.start).sort((a, b) => a.start - b.start)[0];
+  const i = next ? visible.findIndex(x => x.file === next.file) : -1;
+  if (i >= 0 && next.start - (cur.start + cur.dur) < 120) {
+    if (unfinished(next)) openLiveAt(next, next.start);
+    else openPlayer(i, 0);
+  } else if (visible.some(r => r.stream === cur.stream && r.start > cur.start)) toast('Press N for the next recording');
+});
+
+// browsers cap the rate (Chrome/Firefox at 16×); keep the old one if a value is refused
+function setRate(v) { try { video.playbackRate = v; video.defaultPlaybackRate = v; hdVideo.playbackRate = v; return true; } catch { return false; } }
+$('#speeds').innerHTML = [0.5, 1, 1.25, 1.5, 2, 3, 8, 16].map(s => `<button data-s="${s}" class="${s === 1 ? 'on' : ''}">${s}×</button>`).join('');
+$('#speeds').addEventListener('click', e => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (!setRate(+b.dataset.s)) { toast(`${b.dataset.s}× isn't supported by this browser`); return; }
+  speed = +b.dataset.s;
+  [...$('#speeds').children].forEach(x => x.classList.toggle('on', x === b));
+});
+
+// the picture's own buttons (the browsers' controls are off): play / pause, speed, sound, full screen
+const curVid = () => hd.on ? hdVideo : video;
+let speedOff = false;  // no speeds for this recording
+const PLAY_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4l13 8-13 8z"/></svg>';
+const PAUSE_SVG = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4h4v16H7zM13 4h4v16h-4z"/></svg>';
+const VOL_ON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 9a4 4 0 010 6M18.5 6.5a8 8 0 010 11"/></svg>';
+const VOL_OFF = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 9h3l5-4v14l-5-4H4z"/><path d="M16 9l5 6M21 9l-5 6"/></svg>';
+function syncVctl() {
+  const v = curVid();
+  $('#vPlay').innerHTML = v.paused ? PLAY_SVG : PAUSE_SVG;
+  $('#vPlay').setAttribute('aria-label', v.paused ? 'Play' : 'Pause');
+  $('#vSpeed').textContent = speed + '×';
+  // live has no speeds; there the HD stream has its own sound button (a separate track),
+  // and anything else that plays (a recording) mutes the video itself
+  const atLive = hd.on ? hdEdge() : viewMode() === 'live';
+  $('#vSpeed').hidden = atLive || speedOff;
+  $('#vMute').hidden = !!hd.rt?.a;
+  $('#vMute').innerHTML = v.muted || v.volume === 0 ? VOL_OFF : VOL_ON;
+  $('#vMute').setAttribute('aria-label', v.muted ? 'Turn the sound on' : 'Turn the sound off');
+}
+for (const v of [video, hdVideo]) for (const e of ['play', 'pause', 'playing', 'volumechange', 'loadeddata']) v.addEventListener(e, syncVctl);
+setInterval(syncVctl, 1000);
+$('#vPlay').onclick = () => { const v = curVid(); v.paused ? v.play().catch(() => {}) : v.pause(); };
+$('#vMute').onclick = () => { const v = curVid(); v.muted = !v.muted; syncVctl(); };
+$('#vFull').onclick = () => { document.fullscreenElement ? document.exitFullscreen() : $('#vwrap').requestFullscreen?.(); };
+$('#vSpeed').onclick = () => { const b = [...$('#speeds').children], i = b.findIndex(x => x.classList.contains('on')); b[(i + 1) % b.length].click(); syncVctl(); };
+
+// the calendar button: a month of days; the ones with recordings open that day
+const calView = { y: 0, m: 0 };
+function calRender() {
+  const cur = ALL.find(x => x.file === currentFile); if (!cur) return;
+  const have = new Set(ALL.filter(r => r.stream === cur.stream).map(r => r.day));
+  const first = new Date(calView.y, calView.m, 1), lead = (first.getDay() + 6) % 7;
+  const n = new Date(calView.y, calView.m + 1, 0).getDate(), today = dayKey(new Date());
+  const days = [...have].sort(), mk = k => k.slice(0, 7);
+  const ym = `${calView.y}-${pad(calView.m + 1)}`;
+  let cells = '<i></i>'.repeat(lead);
+  for (let d = 1; d <= n; d++) {
+    const k = `${ym}-${pad(d)}`;
+    cells += `<button data-d="${k}" class="${k === cur.day ? 'sel' : ''}${k === today ? ' tod' : ''}"${have.has(k) ? '' : ' disabled'}>${d}</button>`;
+  }
+  $('#calPop').innerHTML = `<div class="calhead"><button data-m="-1" aria-label="Previous month"${days[0] && mk(days[0]) >= ym ? ' disabled' : ''}>‹</button><b>${first.toLocaleDateString([], { month: 'long', year: 'numeric' })}</b><button data-m="1" aria-label="Next month"${days.length && mk(days[days.length - 1]) <= ym ? ' disabled' : ''}>›</button></div>`
+    + `<div class="calgrid">${['M', 'T', 'W', 'T', 'F', 'S', 'S'].map(x => `<span>${x}</span>`).join('')}${cells}</div>`;
+}
+function calToggle(open = $('#calPop').hidden) {
+  const cur = ALL.find(x => x.file === currentFile);
+  if (open && cur) { const d = fromKey(cur.day); calView.y = d.getFullYear(); calView.m = d.getMonth(); calRender(); }
+  $('#calPop').hidden = !open; $('#pCal').setAttribute('aria-expanded', open);
+}
+$('#pCal').onclick = e => { e.stopPropagation(); calToggle(); };
+$('#calPop').onclick = e => {
+  e.stopPropagation();
+  const mb = e.target.closest('button[data-m]'), db = e.target.closest('button[data-d]');
+  if (mb && !mb.disabled) { calView.m += +mb.dataset.m; if (calView.m < 0) { calView.m = 11; calView.y--; } if (calView.m > 11) { calView.m = 0; calView.y++; } calRender(); }
+  if (db && !db.disabled) {
+    const cur = ALL.find(x => x.file === currentFile), day = db.dataset.d;
+    calToggle(false);
+    if (cur && day !== cur.day) {
+      const recs = visible.filter(r => r.stream === cur.stream && r.day === day).sort((a, b) => a.start - b.start);
+      if (recs.length) openPlayer(recs[0]._i, unfinished(recs[0]) ? null : 0);
+    }
+  }
+};
+document.addEventListener('click', () => { if (!$('#calPop').hidden) calToggle(false); });
+
+// the buttons and badges on the picture fade out after a few seconds of playing; a touch or
+// mouse move (or pausing) brings them back
+(() => {
+  let t = 0, px = -1, py = -1;
+  const arm = () => { clearTimeout(t); if (!curVid().paused) t = setTimeout(() => vwrap.classList.add('idle'), 3000); };
+  const wake = () => { vwrap.classList.remove('idle'); arm(); };
+  // only real input wakes it (the browser also fires mouse moves when things fade under a still pointer)
+  vwrap.addEventListener('pointermove', e => {
+    if (Math.abs(e.clientX - px) + Math.abs(e.clientY - py) < 6) return;
+    if (px >= 0) wake();
+    px = e.clientX; py = e.clientY;
+  }, { passive: true });
+  for (const e of ['pointerdown', 'keydown']) vwrap.addEventListener(e, wake, { passive: true });
+  for (const v of [video, hdVideo]) {
+    v.addEventListener('pause', wake);
+    for (const e of ['play', 'playing']) v.addEventListener(e, () => { if (!vwrap.classList.contains('idle')) arm(); });
+  }
+  document.addEventListener('keydown', e => { if (modal.classList.contains('open') && e.key !== 'Escape') wake(); });
+  arm();
+})();
+
+/* ===== events ===== */
+function toast(msg) {
+  const t = $('#toast'); t.textContent = msg; t.classList.add('on');
+  clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('on'), 2200);
+}
+
+const isMobile = () => matchMedia('(max-width:640px)').matches;
+// the mobile timeline is sized in px, so redraw it when the width changes (rotation, breakpoint)
+let rzT, rzW = innerWidth;
+addEventListener('resize', () => {
+  clearTimeout(rzT);
+  rzT = setTimeout(() => {
+    if (modal.classList.contains('open')) renderScrub();
+  }, 150);
+});
+$('#pClose').onclick = () => closePlayer();
+modal.addEventListener('click', e => { if (e.target === modal) closePlayer(); });
+// swipe down on the video area to close (mobile)
+(() => { let y0 = null; const st = $('.stage');
+  st.addEventListener('touchstart', e => { y0 = e.touches.length === 1 && !e.target.closest('.scrub') && zoom.z === 1 ? e.touches[0].clientY : null; }, { passive: true });
+  st.addEventListener('touchend', e => { if (y0 !== null && e.changedTouches[0].clientY - y0 > 110 && !document.fullscreenElement) closePlayer(); y0 = null; }, { passive: true });
+})();
+$('#pCopy').onclick = async () => {
+  const r = ALL.find(x => x.file === currentFile); if (!r) return;
+  const url = location.origin + location.pathname + hashFor(r);
+  try { await navigator.clipboard.writeText(url); toast('Link copied'); }
+  catch { prompt('Copy this link:', url); }
+};
+
+document.addEventListener('keydown', e => {
+  const typing = /INPUT|TEXTAREA/.test(document.activeElement?.tagName);
+  if (!modal.classList.contains('open')) return;
+  if (typing) return;
+  const k = e.key.toLowerCase();
+  if (k === 'escape') closePlayer();
+  else if (k === 'n') step(1);
+  else if (k === 'p') step(-1);
+  else if (k === ']') dayStep(1);
+  else if (k === '[') dayStep(-1);
+  else if (k === 'm') jumpMotion(e.shiftKey ? -1 : 1);
+  else if (k === '+' || k === '=') setZoom(scrub.z * 2);
+  else if (k === '-' || k === '_') setZoom(scrub.z / 2);
+  else if (k === 'f' && !video.hidden) { document.fullscreenElement ? document.exitFullscreen() : $('#vwrap').requestFullscreen?.(); } // the badge too
+  else if (document.activeElement !== video && document.activeElement !== hdVideo && !video.hidden) {
+    const v = hd.on ? hdVideo : video;  // whichever is showing
+    if (k === ' ') { e.preventDefault(); v.paused ? v.play() : v.pause(); }
+    else if (k === 'arrowright') { hd.on ? seekAbs(playheadTime() + 10) : v.currentTime += 10; }
+    else if (k === 'arrowleft') { hd.on ? seekAbs(playheadTime() - 10) : v.currentTime -= 10; }
+  }
+});
+
+load();
+setInterval(() => { if (!document.hidden) load(); }, CFG.refreshMs);
+// real-time live status
+setInterval(async () => {
+  if (document.hidden || !loadedOnce) return;
+  const sig = () => JSON.stringify([...new Set([...(LIVE ? [...LIVE.keys()] : []), ...dvrStreams()])].sort());
+  const before = sig();
+  await fetchStat();
+  build();
+  if (before !== sig()) render();
+  else if (currentFile) refreshPlayerMeta();
+}, CFG.statMs);
+// rewindable copies of the recordings in progress
+setInterval(async () => {
+  if (document.hidden || !loadedOnce) return;
+  if (!(await fetchLiveDvr())) return;
+  build(); render();
+  if (currentFile) refreshPlayerMeta();
+}, CFG.liveDvrMs);
+// tick the "live for" counter in the player
+setInterval(() => {
+  const r = currentFile && ALL.find(x => x.file === currentFile);
+  if (r && r.status === 'recording') { r.dur = Date.now() / 1000 - r.start; refreshPlayerMeta(); }
+}, 1000);
+</script>
+<script type="module">
+// Google sign-in (Firebase Auth). The page stays behind the sign-in screen until someone is signed in.
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut }
+  from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
+const app = initializeApp({
+  apiKey: 'AIzaSyAJr9yvtgtt7e21RSgLkXFfrsdDxZWO88c',
+  authDomain: 'localbc-41b52.firebaseapp.com',
+  projectId: 'localbc-41b52',
+  storageBucket: 'localbc-41b52.firebasestorage.app',
+  messagingSenderId: '626888021222',
+  appId: '1:626888021222:web:89911e33e91338b2bf9727',
+});
+const auth = getAuth(app), $ = id => document.getElementById(id);
+const login = $('login'), card = $('loginCard'), err = $('loginErr'), acct = $('acct');
+onAuthStateChanged(auth, user => {
+  login.hidden = !!user;
+  card.hidden = !!user ? true : false;
+  acct.hidden = !user;
+  if (user) {
+    acct.title = user.email || 'Account';
+    if (user.photoURL) { acct.style.backgroundImage = `url("${user.photoURL}")`; acct.textContent = ''; }
+    else acct.textContent = (user.displayName || user.email || '?')[0].toUpperCase();
+    window.dispatchEvent(new Event('resize'));  // the page drew itself behind the sign-in screen
+  }
+}, () => { card.hidden = false; err.textContent = 'Could not check the sign-in. Reload to try again.'; });
+$('gSignIn').onclick = async () => {
+  err.textContent = ''; $('gSignIn').disabled = true;
+  const p = new GoogleAuthProvider();
+  try { await signInWithPopup(auth, p); }
+  catch (e) {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') { try { await signInWithRedirect(auth, p); return; } catch (e2) { e = e2; } }
+    if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request')
+      err.textContent = e.code === 'auth/unauthorized-domain' ? 'This address isn\'t allowed for Google sign-in yet.' : 'Sign-in failed. Try again.';
+  }
+  $('gSignIn').disabled = false;
+};
+acct.onclick = () => { if (confirm(`Sign out${auth.currentUser?.email ? ' ' + auth.currentUser.email : ''}?`)) signOut(auth); };
+</script>
+</body>
+</html>

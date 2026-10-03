@@ -1,0 +1,16 @@
+[Unit]
+Description=Car presence outside the gate, one bit per minute (car_presence.py)
+After=network-online.target docker.service
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rtmp-web
+ExecStart=/home/ubuntu/rtmp-web/.venv/bin/python /home/ubuntu/rtmp-web/car_presence.py
+Restart=always
+RestartSec=30
+Nice=10
+MemoryMax=250M
+
+[Install]
+WantedBy=multi-user.target

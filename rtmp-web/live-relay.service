@@ -1,0 +1,15 @@
+[Unit]
+Description=Re-time live RTMP streams for the browser's live view (live_relay.py)
+After=docker.service network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rtmp-web
+ExecStart=/usr/bin/python3 /home/ubuntu/rtmp-web/live_relay.py
+Restart=always
+RestartSec=5
+Nice=5
+MemoryMax=150M
+
+[Install]
+WantedBy=multi-user.target

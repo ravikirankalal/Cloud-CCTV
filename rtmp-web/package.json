@@ -1,0 +1,6 @@
+{
+  "name": "rtmp-web-hd",
+  "private": true,
+  "description": "node deps of hd_source.js",
+  "dependencies": { "ws": "^8.18.0", "xmlhttprequest-ssl": "^2.1.0" }
+}

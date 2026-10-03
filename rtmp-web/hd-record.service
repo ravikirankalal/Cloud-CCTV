@@ -1,0 +1,18 @@
+[Unit]
+Description=HD recording of cam1 from the TrueCloud cloud relay (hd_record.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rtmp-web
+ExecStart=/usr/bin/python3 /home/ubuntu/rtmp-web/hd_record.py /home/ubuntu/rtmp-web/state/hd-device.json cam1
+Restart=always
+KillMode=mixed
+TimeoutStopSec=20
+RestartSec=30
+Nice=5
+MemoryMax=250M
+
+[Install]
+WantedBy=multi-user.target

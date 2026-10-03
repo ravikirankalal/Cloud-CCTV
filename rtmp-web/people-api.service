@@ -1,0 +1,17 @@
+[Unit]
+Description=Saves "same person" marks from the recordings page (people_api.py)
+After=network.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/rtmp-web
+ExecStart=/usr/bin/python3 /home/ubuntu/rtmp-web/people_api.py
+Restart=always
+RestartSec=5
+MemoryMax=50M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=/home/ubuntu/rtmp-web/run /home/ubuntu/rtmp-web/state
+
+[Install]
+WantedBy=multi-user.target

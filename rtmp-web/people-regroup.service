@@ -1,0 +1,14 @@
+[Unit]
+Description=Applies "same person" marks and names from the recordings page (people.py)
+# Started by people-regroup.path, so marks apply in seconds, not only when the
+# every-minute cron run of recordings.py notices them (and also while cron is paused).
+#   sudo cp people-regroup.path people-regroup.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now people-regroup.path
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/ubuntu/rtmp-web
+# regroups each camera whose marks are newer than its people.json (again for marks saved
+# meanwhile); takes the same per-camera lock as the analysers' runs of people.py
+ExecStart=/usr/bin/python3 recordings.py --people
+MemoryMax=600M
