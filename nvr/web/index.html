@@ -131,7 +131,8 @@ const dayKey = t => new Date(t * 1000).toLocaleDateString('en-CA', { timeZone: T
 const dayStart = key => Date.parse(key + 'T00:00:00+05:30') / 1000;
 const api = (p, q) => fetch(`/api/${p}?` + new URLSearchParams({ stream: STREAM, ...q }), { cache: 'no-store' });
 const HEVC = audio => `video/mp4; codecs="hvc1.1.6.L150.90${audio ? ', mp4a.40.2' : ''}"`;
-const MSE = window.ManagedMediaSource || window.MediaSource;
+const MSE = window.MediaSource || window.ManagedMediaSource;   // ManagedMediaSource: iPhone Safari
+video.disableRemotePlayback = true; audio.disableRemotePlayback = true;  // (ManagedMediaSource needs it)
 const canHevcMse = !!MSE && MSE.isTypeSupported(HEVC(false));
 
 /* ===================== state ===================== */
@@ -152,7 +153,7 @@ function stopAll() {
 
 /* ===================== live: WebSocket relay (zero delay) ===================== */
 // hd_source.js sends {"t0","audio"} then fMP4: byte 0 = 0 picture / 1 sound, rest = init or fragment
-const RT_BEHIND = 0.4;
+const RT_BEHIND = 0.4, AUD_BEHIND = 0.8;
 function rtStart() {
   stopAll();
   st.mode = 'live';
@@ -226,10 +227,13 @@ function rtSound(rt, data) {
     a.ms.addEventListener('sourceopen', () => {
       try { a.sb = a.ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"'); } catch { return; }
       a.sb.addEventListener('updateend', () => {
+        // sound comes in 0.26 s pieces with network jitter: play AUD_BEHIND behind the newest
+        // piece so it never runs dry, and catch up by speeding up slightly instead of jumping
         const b = audio.buffered;
         if (b.length) {
-          const end = b.end(b.length - 1);
-          if (end - audio.currentTime > 1.5 || audio.currentTime < b.start(b.length - 1)) audio.currentTime = Math.max(b.start(b.length - 1), end - 0.3);
+          const end = b.end(b.length - 1), lag = end - audio.currentTime;
+          if (lag > 3 || audio.currentTime < b.start(b.length - 1)) audio.currentTime = Math.max(b.start(b.length - 1), end - AUD_BEHIND);
+          else audio.playbackRate = lag > AUD_BEHIND + 0.6 ? 1.06 : lag < AUD_BEHIND - 0.4 ? 0.96 : 1;
           if (audio.currentTime - b.start(0) > 90) { try { a.sb.remove(b.start(0), audio.currentTime - 60); } catch {} }
         }
         soundSync(); a.pump();
@@ -433,15 +437,48 @@ $('prevDay').onclick = () => { st.day = dayKey(dayStart(st.day) - 43200); st.cen
 $('nextDay').onclick = () => { st.day = dayKey(dayStart(st.day) + 129600); st.center = Math.min(now(), dayStart(st.day) + 43200); loadSpans(); };
 addEventListener('resize', draw);
 
-/* sound: HLS carries it in the video; the live relay in a separate audio element */
+/* sound: HLS carries it in the video; the live relay sends it to a separate audio element.
+   Browsers allow sound only after a tap, so the picture always starts muted and sound comes
+   on with the first tap (the button says "Tap for sound" until then). */
+let unlocked = false;
 function soundSync() {
-  video.muted = !st.soundOn || st.mode === 'live';
+  const live = st.mode === 'live';
+  // HLS: the video's own sound (only once unlocked, or the browser refuses to play)
+  if (!live) video.muted = !(st.soundOn && unlocked);
+  else video.muted = true;
   audio.muted = !st.soundOn;
-  if (st.rt?.a) { if (video.paused) audio.pause(); else if (st.soundOn && audio.paused) audio.play().catch(() => {}); }
+  audio.volume = video.volume;
+  if (live && st.rt?.a) {
+    if (video.paused || !st.soundOn) audio.pause();
+    else if (audio.paused && unlocked) {
+      // start only with some sound buffered, else it starts, runs dry and stutters
+      const b = audio.buffered;
+      if (b.length && b.end(b.length - 1) - audio.currentTime >= AUD_BEHIND - 0.2) audio.play().catch(() => {});
+    }
+  }
   soundButton();
 }
-function soundButton() { $('soundBtn').textContent = st.soundOn ? '🔊' : '🔇'; }
-$('soundBtn').onclick = () => { st.soundOn = !st.soundOn; try { localStorage.setItem('sound', st.soundOn ? 'on' : 'off'); } catch {} soundSync(); };
+function soundBlocked() { return st.soundOn && !unlocked && !video.paused; }
+function soundButton() {
+  const b = $('soundBtn');
+  b.textContent = !st.soundOn ? '🔇' : soundBlocked() ? '🔈 Tap for sound' : '🔊';
+}
+function unlock() {
+  if (unlocked) return;
+  unlocked = true;
+  soundSync();
+}
+// any tap in the page counts as the gesture browsers need for sound
+document.addEventListener('pointerdown', unlock, { capture: true });
+document.addEventListener('keydown', unlock, { capture: true });
+$('soundBtn').onclick = () => {
+  if (soundBlocked()) { unlock(); return; }
+  st.soundOn = !st.soundOn;
+  try { localStorage.setItem('sound', st.soundOn ? 'on' : 'off'); } catch {}
+  soundSync();
+};
+for (const e of ['playing', 'pause']) audio.addEventListener(e, soundButton);
+video.addEventListener('volumechange', () => { audio.volume = video.volume; });
 
 /* download */
 $('dlBtn').onclick = () => $('dlg').showModal();
