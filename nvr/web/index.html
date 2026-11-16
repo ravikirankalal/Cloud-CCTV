@@ -7,7 +7,7 @@
 <title>Guttedar Nilaya</title>
 <style>
 :root{--bg:#0c0f13;--panel:#151a21;--panel2:#1c232c;--line:#27303b;--text:#e8edf2;--muted:#8b96a3;
-  --rec:#3b82f6;--live:#ff4d5e;--ok:#37b24d;--warn:#f59f00;--radius:12px;color-scheme:dark}
+  --rec:#3b82f6;--card:#f59f00;--off:#6b2630;--live:#ff4d5e;--ok:#37b24d;--warn:#f59f00;--radius:12px;color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   -webkit-tap-highlight-color:transparent}
@@ -48,6 +48,11 @@ header h1{font-size:18px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text
 .tlhead .day{flex:1;text-align:center;font-weight:600}
 .bar{position:relative;height:56px;touch-action:none;cursor:pointer;user-select:none}
 .bar canvas{width:100%;height:100%;display:block}
+.key{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 6px;vertical-align:-1px}
+.dbg{margin-top:10px;background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius);padding:10px 12px;font-size:13px;color:var(--muted)}
+.dbg b{color:var(--text)}.dbg button{float:right;padding:2px 8px;font-size:12px}
+.dbg ol{margin:6px 0 0;padding-left:18px;font-variant-numeric:tabular-nums}
+.pill.card{background:var(--card);color:#1a1300}
 .hint{color:var(--muted);font-size:12px;margin-top:6px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
 /* login */
 .login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:var(--bg);padding:24px}
@@ -73,7 +78,7 @@ dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
   <div class="stage" id="stage">
     <video id="video" playsinline muted autoplay></video>
     <audio id="audio" hidden></audio>
-    <div class="badge"><span class="pill live" id="liveTag" hidden>LIVE</span><span class="pill" id="clock">--:--:--</span></div>
+    <div class="badge"><span class="pill live" id="liveTag" hidden>LIVE</span><span class="pill" id="clock">--:--:--</span><span class="pill" id="srcTag" hidden></span></div>
     <div class="msg" id="msg" hidden></div>
   </div>
 
@@ -96,8 +101,10 @@ dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
       <span class="seg" id="zooms"><button data-z="24">24h</button><button data-z="6">6h</button><button data-z="1" class="on">1h</button></span>
     </div>
     <div class="bar" id="bar"><canvas id="cv"></canvas></div>
-    <div class="hint"><span>Tap or drag the bar to jump · blue = recorded</span><span id="store"></span></div>
+    <div class="hint"><span>Tap or drag the bar to jump · <i class="key" style="background:var(--rec)"></i>recorded <i class="key" style="background:var(--card)"></i>from SD card <i class="key" style="background:var(--off)"></i>camera off</span><span id="store"></span></div>
   </div>
+
+  <div class="dbg" id="dbg" hidden><button id="dbgOff">Turn off</button><b>Debug</b> · what's playing, and each switch (newest first)<ol id="dbgLog"></ol></div>
 </div>
 
 <dialog id="dlg">
@@ -330,7 +337,7 @@ function seekWall(t) {
 const cv = $('cv'), bar = $('bar');
 async function loadSpans() {
   const t0 = dayStart(st.day) - 3600, t1 = Math.min(dayStart(st.day) + 90000, now() + 60);
-  try { const r = await api('coverage', { from: t0, to: t1 }); if (r.ok) st.spans = (await r.json()).spans; } catch {}
+  try { const r = await api('coverage', { from: t0, to: t1 }); if (r.ok) { const j = await r.json(); st.spans = j.spans; st.card = j.card || []; st.offline = j.offline || []; } } catch {}
   // also what's after this day, so playback can run on
   try { const r = await api('coverage', { from: t1, to: now() + 60 }); if (r.ok) st.spans = st.spans.concat((await r.json()).spans); } catch {}
   draw();
@@ -348,8 +355,13 @@ function draw() {
   const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
   const [a, b] = view(), x = t => (t - a) / (b - a) * w;
   g.fillStyle = '#1f2731'; g.fillRect(0, 14, w, 24);
-  g.fillStyle = getComputedStyle(document.body).getPropertyValue('--rec');
-  for (const [s, e] of st.spans) if (e > a && s < b) g.fillRect(Math.max(0, x(s)), 14, Math.max(1.5, x(e) - x(s)), 24);
+  const css = getComputedStyle(document.body), paint = (list, color, y = 14, hgt = 24) => {
+    g.fillStyle = css.getPropertyValue(color);
+    for (const [s, e] of list || []) if (e > a && s < b) g.fillRect(Math.max(0, x(s)), y, Math.max(1.5, x(e) - x(s)), hgt);
+  };
+  paint(st.offline, '--off');         // gaps the camera itself didn't record
+  paint(st.spans, '--rec');           // recorded
+  paint(st.card, '--card');           // of which: filled from the camera's SD card
   // future: hatched
   const n = now();
   if (n < b) { g.fillStyle = '#0c0f13'; g.fillRect(x(n), 14, w - x(n), 24); }
@@ -490,11 +502,50 @@ $('dlLens').onclick = e => {
   $('dlg').close();
 };
 
+/* debug: which source is playing (live relay / HLS live / cloud recording / SD card), and each switch */
+const CARD_RUN = 1e11;  // gapfill.py's run ids (epoch ms) are above this: segments from the SD card
+let debug = false, lastSrc = null;
+try {
+  const q = new URLSearchParams(location.search);
+  debug = q.has('debug') ? q.get('debug') !== '0' : localStorage.getItem('debug') === 'on';
+} catch {}
+function setDebug(on) {
+  debug = on; try { localStorage.setItem('debug', on ? 'on' : 'off'); } catch {}
+  $('dbg').hidden = !on; $('srcTag').hidden = !on; lastSrc = null;
+}
+function source() {
+  if (st.mode === 'live') return { id: 'relay', text: 'Live · cloud (relay)' };
+  if (st.mode === 'hlslive') return { id: 'hlslive', text: 'Live · cloud (HLS)' };
+  if (st.mode !== 'vod') return null;
+  const ct = video.currentTime, f = st.frags.find(f => ct >= f.start - 0.05 && ct < f.start + f.duration + 0.05);
+  const m = f && /init-(\d+)\.mp4/.exec(f.initSegment?.url || f.initSegment?.relurl || '');
+  if (!m) return null;
+  return +m[1] > CARD_RUN ? { id: 'card', text: 'Recording · SD card' } : { id: 'cloud', text: 'Recording · cloud' };
+}
+setInterval(() => {
+  if (!debug) return;
+  const s = source(); if (!s) return;
+  const tag = $('srcTag'); tag.textContent = s.text; tag.classList.toggle('card', s.id === 'card');
+  if (s.id === lastSrc) return;
+  const li = document.createElement('li');
+  li.textContent = `${fmtTime(now())} → ${s.text}` + (st.mode === 'vod' && st.wall ? ` (footage at ${fmtTime(st.wall)})` : '');
+  $('dbgLog').prepend(li);
+  while ($('dbgLog').children.length > 30) $('dbgLog').lastChild.remove();
+  lastSrc = s.id;
+}, 500);
+let taps = [];
+$('camName').addEventListener('click', () => {
+  taps = taps.filter(t => Date.now() - t < 2000).concat(Date.now());
+  if (taps.length >= 5) { taps = []; setDebug(!debug); }
+});
+$('dbgOff').onclick = () => setDebug(false);
+
 /* start (after sign-in) */
 window.startApp = () => {
   $('app').hidden = false;
   if (!(window.Hls && Hls.isSupported()) && !canHevcMse && !video.canPlayType('application/vnd.apple.mpegurl'))
     message("<b>This browser can't play the HD video</b>It's H.265: use Safari, or Chrome / Edge on a device with H.265 hardware decoding.");
+  setDebug(debug);
   loadSpans(); health(); goLive();
 };
 </script>

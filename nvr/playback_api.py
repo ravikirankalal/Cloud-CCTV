@@ -5,7 +5,9 @@ NVR API: playlists, coverage and exports, all from the recorder's SQLite index.
     python3 playback_api.py            (nvr-playback.service; listens on 127.0.0.1:PORT, nginx in front)
 
   GET /api/streams                         [{"id", "name"}]
-  GET /api/coverage?stream&from&to         {"spans": [[start, end], ...]}   (epoch s; gaps < GAP s merged)
+  GET /api/coverage?stream&from&to         {"spans": [[start, end], ...],   (epoch s; gaps < GAP s merged)
+                                            "card": [...],    the parts filled from the camera's SD card
+                                            "offline": [...]} gaps the camera itself didn't record
   GET /api/vod.m3u8?stream&from&to         HLS VOD playlist of the segments in [from, to]
   GET /api/live.m3u8?stream                HLS live playlist: the newest LIVE_SEGS segments
   GET /api/export.mp4?stream&from&to       one MP4 of [from, to] (stream copy, no re-encode)
@@ -35,6 +37,7 @@ GAP = 2.0                  # seconds: a smaller hole between segments isn't a ga
 LIVE_SEGS = 4
 LIVE_TARGET = 15          # fixed TARGETDURATION for live (segments run up to ~13 s: the camera's
                           # key frames are 10 s apart); it mustn't change between reloads
+CARD_RUN = 10 ** 11        # gapfill.py's run ids are epoch ms: above this = from the SD card
 MAX_SEG = 60              # no segment is longer: lets time-range queries use the index both ways
 MAX_VOD = 24 * 3600        # longest playlist
 MAX_EXPORT = 3600          # longest export
@@ -77,6 +80,30 @@ def playlist(rows, live=False, seq=0, dseq=0):
     if not live:
         out.append("#EXT-X-ENDLIST")
     return "\n".join(out) + "\n"
+
+
+def offline(stream, t0, t1, rows):
+    """the parts of gaps gapfill.py found the camera didn't record (not on its card either)."""
+    try:
+        with db() as c:
+            gaps = c.execute("SELECT gap_from, gap_to FROM fills WHERE stream=? AND status='camera_offline' "
+                             "AND gap_to>? AND gap_from<?", (stream, t0, t1)).fetchall()
+    except sqlite3.OperationalError:  # no gap filler yet
+        return []
+    out = []
+    for g0, g1 in gaps:
+        # minus what's recorded inside the gap (the card's part)
+        cur = g0
+        for r in rows:
+            s, e = r["start"], r["start"] + r["dur"]
+            if e <= cur or s >= g1:
+                continue
+            if s > cur:
+                out.append([round(cur, 3), round(s, 3)])
+            cur = max(cur, e)
+        if cur < g1:
+            out.append([round(cur, 3), round(g1, 3)])
+    return out
 
 
 def spans(rows):
@@ -130,7 +157,10 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, json.dumps([{"id": k, "name": v} for k, v in STREAMS.items()]))
             if u.path == "/api/coverage":
                 s, t0, t1 = self.args(q, limit=40 * 86400)
-                return self.send(200, json.dumps({"spans": spans(segments(s, t0, t1))}))
+                rows = segments(s, t0, t1)
+                return self.send(200, json.dumps({"spans": spans(rows),
+                                                  "card": spans([r for r in rows if r["run"] > CARD_RUN]),
+                                                  "offline": offline(s, t0, t1, rows)}))
             if u.path == "/api/vod.m3u8":
                 s, t0, t1 = self.args(q)
                 rows = segments(s, t0, t1)

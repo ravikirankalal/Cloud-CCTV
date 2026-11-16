@@ -9,6 +9,8 @@ WorkingDirectory=/home/ubuntu/nvr
 Environment=NVR_DATA=/home/ubuntu/nvr-data
 # the zero-delay live relay (nginx: /api/live-ws/cam1)
 Environment=HD_LIVE_SOCK=/home/ubuntu/nvr/run/hd-live-cam1.sock
+# the camera session's control socket (SD-card search and replay, settings: gapfill.py)
+Environment=CTRL_SOCK=/home/ubuntu/nvr/run/camera-cam1.sock
 ExecStartPre=/bin/mkdir -p /home/ubuntu/nvr/run
 ExecStart=/usr/bin/python3 /home/ubuntu/nvr/recorder.py /home/ubuntu/nvr/state/hd-device.json cam1
 Restart=always

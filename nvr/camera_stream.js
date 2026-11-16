@@ -272,7 +272,7 @@ function soundFrames(data, camTs) {  // -> [[ADTS frame, 90 kHz time], ...]
 // ---- the recording stream: MPEG-TS, H.265 (PID 0x100) and AAC ADTS (PID 0x101). Timestamps
 // are arrival times on one clock (so sound stays with the picture), spaced at least a frame
 // apart: frames come from the cloud in bursts.
-const TS = (() => {
+function makeTS() {  // an MPEG-TS writer; TS (below) is the live recording's, a replay gets its own
   const VPID = 0x100, APID = 0x101, PMT_PID = 0x1000, cc = {};
   const crc32 = b => {
     let c = 0xffffffff;
@@ -328,8 +328,8 @@ const TS = (() => {
     return t;
   }
   return {
-    video(isKey, data) {
-      const t = stamp("v"), d = Buffer.from(data);
+    video(isKey, data, t = stamp("v")) {
+      const d = Buffer.from(data);
       const pes = Buffer.concat([Buffer.from([0, 0, 1, 0xe0, 0, 0, 0x80, 0x80, 5, ...pts5(t)]), d]);  // length 0: video may be unbounded
       const pkts = packets(VPID, pes, t);
       return Buffer.concat(isKey ? [...packets(0, PAT), ...packets(PMT_PID, PMT), ...pkts] : pkts);
@@ -341,7 +341,8 @@ const TS = (() => {
       return Buffer.concat(packets(APID, pes));
     },
   };
-})();
+}
+const TS = makeTS();
 self.postMessage = ({ message, data }) => {
   if (message === "onrecvframeex") {
     if (data.frametype === 0) {                                      // audio (AAC, ADTS)
@@ -377,10 +378,101 @@ self.postMessage = ({ message, data }) => {
     // experiment: does that keep it going without a gap?)
     if (!renew) { renew = setInterval(() => { log("camera_stream: renewing the stream"); send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM }); }, RENEW_S * 1000); }
     else log(`camera_stream: stream renewed (code ${data.code})`);
+  } else if (ctl.on(message, data)) {
+    // the control socket's replies (SD-card search and replay, camera settings)
   } else if (message === "ondisconnect") {
     quit(`disconnected (${data.code})`);
   }
 };
+
+// ---- the control socket (CTRL_SOCK): everything else goes through this same session, since a
+// second session to the camera knocks this one off. One request per connection, a JSON line:
+//   {"op":"search","from":E,"to":E}  -> {"rec":[begin,end,type]} lines, then {"done":true}
+//   {"op":"replay","from":E,"to":E}  -> {"start":E} (the first frame's time), then MPEG-TS
+//                                       (H.265 + AAC) of the card's recording until `to`
+//   {"op":"setup","str":"..."}       -> {"result":n,"str":"..."}   (camera settings, remote_setup2)
+// E = epoch seconds; the camera's card works in local time (epoch + 5:30, CARD_TZ_S).
+const CARD_TZ_S = +(process.env.CARD_TZ_S || 19800);
+const ctl = (() => {
+  const chn = Array(128).fill(0); chn[0] = 1;
+  let search = null, replay = null, setup = null;
+  const line = (sock, o) => { try { sock.write(JSON.stringify(o) + "\n"); } catch {} };
+  function stopReplay(why) {
+    const r = replay; if (!r) return;
+    replay = null; clearInterval(r.timer);
+    send("replay_stop", { sessionKey: key });
+    log(`camera_stream: card replay ${why} (${r.frames} frames)`);
+    try { r.sock.end(); } catch {}
+  }
+  function onRecFrame(d) {
+    const r = replay; if (!r) return;
+    const isVideo = d.frametype === 1 || d.frametype === 2;
+    // card frame times are local ms (epoch + 5:30) as far as seen; told apart from epoch ms by size
+    const ep = ts => { const s = ts / 1000; return Math.abs(s - CARD_TZ_S - r.from) < Math.abs(s - r.from) ? s - CARD_TZ_S : s; };
+    if (r.first == null) {
+      if (d.frametype !== 1) return;                                 // start on a key frame
+      r.first = d.ts_ms; line(r.sock, { start: ep(d.ts_ms) });
+    }
+    r.last = Date.now();
+    const t = Math.round((d.ts_ms - r.first) * 90) + 90000;
+    if (t < 0) return;
+    let buf = null;
+    if (isVideo) { r.frames++; buf = r.ts.video(d.frametype === 1, d.frameData, t); }
+    else if (d.frametype === 0 && d.enc?.startsWith("AAC") && d.frameData[0] === 0xff) buf = r.ts.audio(Buffer.from(d.frameData), t);
+    if (buf) r.sock.write(buf);
+    if (ep(d.ts_ms) >= r.to) stopReplay("reached the end");
+  }
+  function on(message, data) {
+    if (message === "onsearchrec") { if (search) line(search, { rec: [data.file_begintime - CARD_TZ_S, data.file_endtime - CARD_TZ_S, data.file_type] }); return true; }
+    if (message === "onsearchrecend") {
+      if (search) { line(search, { done: true }); search.end(); search = null; }
+      send("find_file_stop_2", { sessionKey: key }); return true;
+    }
+    if (message === "onrecvrecframe") { onRecFrame(data); return true; }
+    if (message === "onremotesetup") {
+      if (setup) { line(setup, { result: data.result, str: String(data.str || "").replace(/\0+$/, "") }); setup.end(); setup = null; }
+      return true;
+    }
+    return false;
+  }
+  function request(sock, req) {
+    if (!started) return line(sock, { error: "no session yet" }), sock.end();
+    if (req.op === "search") {
+      if (search) return line(sock, { error: "busy" }), sock.end();
+      search = sock;
+      send("find_file_start_2", { sessionKey: key, chnlist: chn, begintime: Math.floor(req.from) + CARD_TZ_S, endtime: Math.ceil(req.to) + CARD_TZ_S, type: 15 });
+      setTimeout(() => { if (search === sock) { line(sock, { error: "search timed out" }); sock.end(); search = null; } }, 30000);
+    } else if (req.op === "replay") {
+      if (replay) return line(sock, { error: "busy" }), sock.end();
+      if (rerequested) return line(sock, { error: "the live stream is stalled" }), sock.end();
+      const r = replay = { sock, from: req.from, to: req.to, ts: makeTS(), first: null, last: Date.now(), frames: 0 };
+      sock.on("close", () => { if (replay === r) stopReplay("cancelled"); });
+      r.timer = setInterval(() => { if (Date.now() - r.last > 30000) stopReplay("stalled"); }, 1000);
+      log(`camera_stream: card replay of ${Math.round(req.to - req.from)} s`);
+      send("replay_start", { sessionKey: key, channel: chn, starttime: Math.floor(req.from) + CARD_TZ_S, endtime: Math.ceil(req.to) + CARD_TZ_S, type: 15, tasktype: 1 });
+    } else if (req.op === "setup") {
+      if (setup) return line(sock, { error: "busy" }), sock.end();
+      setup = sock;
+      send("remote_setup2", { sessionKey: key, setupstr: String(req.str) });
+      setTimeout(() => { if (setup === sock) { line(sock, { error: "setup timed out" }); sock.end(); setup = null; } }, 15000);
+    } else { line(sock, { error: "unknown op" }); sock.end(); }
+  }
+  if (process.env.CTRL_SOCK) {
+    const net = require("net"), path_ = process.env.CTRL_SOCK;
+    try { fs.unlinkSync(path_); } catch {}
+    net.createServer(sock => {
+      let buf = "";
+      sock.on("error", () => {});
+      sock.on("data", d => {
+        if (buf === null) return;
+        buf += d; const i = buf.indexOf("\n"); if (i < 0) return;
+        const text = buf.slice(0, i); buf = null;
+        try { request(sock, JSON.parse(text)); } catch (e) { line(sock, { error: e.message }); sock.end(); }
+      });
+    }).listen(path_, () => fs.chmodSync(path_, 0o600));
+  }
+  return { on, stopReplay };
+})();
 
 process.on("uncaughtException", e => quit(`error: ${e.message}`));
 importScripts("433.connector.js");
@@ -396,6 +488,7 @@ setInterval(() => {
   // cloud refuses a new session for a while), and give up only if that brings nothing
   if (started && !rerequested && Date.now() - last > REREQUEST_S * 1000) {
     rerequested = true;
+    ctl.stopReplay("the live stream stalled");  // live first: a card download shares the camera's upload
     log(`camera_stream: no video for ${REREQUEST_S} s, asking for the stream again`);
     send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM });
   }

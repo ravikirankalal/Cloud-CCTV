@@ -24,6 +24,7 @@ browser ──https──▶ nginx ──auth_request──▶ signin.js (Google
 | `nvr/playback_api.py` | Builds HLS playlists for any time range from the index (PROGRAM-DATE-TIME on every segment, DISCONTINUITY at gaps), plus coverage spans and stream-copy MP4 exports. |
 | `nvr/web/index.html` | One page: live view (WebSocket + MSE, ~0.4 s behind; HLS live as fallback), a day timeline (24h / 6h / 1h) to scrub recordings, speed, clip download. Google sign-in via Firebase. |
 | `nvr/signin.js` | Turns the Firebase sign-in into a session cookie nginx checks on every private request. Only emails in `allowed-emails.txt` may in (when that file has any). |
+| `nvr/gapfill.py` | Fills gaps in the recording from the camera's own SD card (search + replay through the recorder's camera session, via `camera_stream.js`'s control socket), as soon as the card has them; marks what the card lacks too as `camera_offline`. |
 | `nvr/models/` | ONNX models (YOLOX-Tiny person detector, OSNet re-identification) for people detection. |
 
 H.265 plays in Safari, Android Chrome, and Chrome / Edge on hardware with H.265 decoding.
@@ -37,10 +38,10 @@ H.265 plays in Safari, Android Chrome, and Chrome / Edge on hardware with H.265 
 ```
 
 ```sh
-sudo install -m 644 nvr/nvr-recorder.service nvr/nvr-playback.service nvr/nvr-signin.service /etc/systemd/system/
+sudo install -m 644 nvr/nvr-recorder.service nvr/nvr-playback.service nvr/nvr-signin.service nvr/nvr-gapfill.service /etc/systemd/system/
 sudo install -m 644 nvr/deploy/nginx-site.conf /etc/nginx/conf.d/nvr.conf
 sudo usermod -aG ubuntu www-data      # nginx reads ~/nvr/web and ~/nvr-data
-sudo systemctl daemon-reload && sudo systemctl enable --now nvr-recorder nvr-playback nvr-signin && sudo systemctl reload nginx
+sudo systemctl daemon-reload && sudo systemctl enable --now nvr-recorder nvr-playback nvr-signin nvr-gapfill && sudo systemctl reload nginx
 ```
 
 ## History

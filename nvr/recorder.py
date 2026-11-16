@@ -266,6 +266,9 @@ def run_once(device, stream):
     # ffmpeg only once the camera sends something (a failed connect otherwise leaves it erroring)
     while not stopping and src.poll() is None:
         if select.select([src.stdout], [], [], 1)[0]:
+            if src.stdout.peek(1):
+                break
+            src.wait()  # readable because it closed: the source quit without sending anything
             break
     if stopping or src.poll() is not None:
         src.wait()

@@ -1,0 +1,15 @@
+[Unit]
+Description=NVR: fill recording gaps from the camera's SD card (gapfill.py)
+After=nvr-recorder.service
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nvr
+Environment=NVR_DATA=/home/ubuntu/nvr-data
+Environment=CTRL_SOCK=/home/ubuntu/nvr/run/camera-cam1.sock
+ExecStart=/usr/bin/python3 /home/ubuntu/nvr/gapfill.py cam1
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
