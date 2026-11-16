@@ -1,0 +1,14 @@
+[Unit]
+Description=NVR: playlists, coverage and exports (api.py)
+After=network.target
+
+[Service]
+User=ubuntu
+Environment=NVR_DATA=/home/ubuntu/nvr-data
+Environment=PORT=3400
+ExecStart=/usr/bin/python3 /home/ubuntu/nvr/api.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
