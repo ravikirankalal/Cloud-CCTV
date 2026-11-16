@@ -219,9 +219,17 @@ class H(BaseHTTPRequestHandler):
                         shutil.copyfileobj(f, out)
                 with open(cur[1], "ab") as out, open(os.path.join(DATA, r["path"]), "rb") as f:
                     shutil.copyfileobj(f, out)
+            # each part re-muxed to start at 0 (a card part's media time starts wherever the card's
+            # did, and the concat demuxer kept that offset: a jump of minutes at the join)
+            norm = []
+            for i, (_, path) in enumerate(parts):
+                out = os.path.join(tmp, f"norm{i}.mp4")
+                if subprocess.run(["ffmpeg", "-nostdin", "-v", "error", "-i", path, "-map", "0", "-c", "copy",
+                                   "-tag:v", "hvc1", "-avoid_negative_ts", "make_zero", "-f", "mp4", out]).returncode == 0:
+                    norm.append(out)
             lst = os.path.join(tmp, "list.txt")
             with open(lst, "w") as f:
-                f.writelines(f"file '{path}'\n" for _, path in parts)
+                f.writelines(f"file '{path}'\n" for path in norm)
             name = f"{stream}_{datetime.fromtimestamp(rows[0]['start']).strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
             self.send_response(200)
             self.send_header("Content-Type", "video/mp4")
