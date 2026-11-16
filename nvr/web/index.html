@@ -98,10 +98,10 @@ dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
       <button id="prevDay" aria-label="Previous day">‹</button>
       <div class="day" id="dayLabel">Today</div>
       <button id="nextDay" aria-label="Next day">›</button>
-      <span class="seg" id="zooms"><button data-z="24">24h</button><button data-z="6">6h</button><button data-z="1" class="on">1h</button></span>
+      <span class="seg" id="zooms"><button data-z="24">24h</button><button data-z="6">6h</button><button data-z="1" class="on">1h</button><button data-z="0.25">15m</button></span>
     </div>
     <div class="bar" id="bar"><canvas id="cv"></canvas></div>
-    <div class="hint"><span>Tap or drag the bar to jump · <i class="key" style="background:var(--rec)"></i>recorded <i class="key" style="background:var(--card)"></i>from SD card <i class="key" style="background:var(--off)"></i>camera off</span><span id="store"></span></div>
+    <div class="hint"><span>Drag the dot to seek · drag or scroll to pan ·<i class="key" style="background:var(--rec)"></i>recorded <i class="key" style="background:var(--card)"></i>from SD card <i class="key" style="background:var(--off)"></i>camera off</span><span id="store"></span></div>
   </div>
 
   <div class="dbg" id="dbg" hidden><button id="dbgOff">Turn off</button><b>Debug</b> · what's playing, and each switch (newest first)<ol id="dbgLog"></ol></div>
@@ -357,37 +357,92 @@ function draw() {
   g.fillStyle = '#1f2731'; g.fillRect(0, 14, w, 24);
   const css = getComputedStyle(document.body), paint = (list, color, y = 14, hgt = 24) => {
     g.fillStyle = css.getPropertyValue(color);
-    for (const [s, e] of list || []) if (e > a && s < b) g.fillRect(Math.max(0, x(s)), y, Math.max(1.5, x(e) - x(s)), hgt);
+    // coalesce into pixel runs: many sub-pixel segments would otherwise each draw at a 1px
+    // minimum and smear into an overlapping barcode. Merge touching/adjacent pixels, then draw.
+    const runs = [];
+    for (const [s, e] of [...(list || [])].sort((p, q) => p[0] - q[0])) {
+      if (e <= a || s >= b) continue;
+      const x0 = Math.max(0, x(s)), x1 = Math.min(w, x(e));
+      if (runs.length && x0 <= runs[runs.length - 1][1] + 0.6) runs[runs.length - 1][1] = Math.max(runs[runs.length - 1][1], x1);
+      else runs.push([x0, x1]);
+    }
+    for (const [x0, x1] of runs) g.fillRect(x0, y, Math.max(1, x1 - x0), hgt);
   };
-  paint(st.offline, '--off');         // gaps the camera itself didn't record
-  paint(st.spans, '--rec');           // recorded
-  paint(st.card, '--card');           // of which: filled from the camera's SD card
+  paint(st.offline, '--off');                                      // camera-off gaps (nothing recorded anywhere)
+  paint([...(st.spans || []), ...(st.card || [])], '--rec');       // one continuous recorded base: live + card-filled
+  paint(st.card, '--card');                                        // highlight, on top, the parts filled from the SD card
   // future: hatched
   const n = now();
   if (n < b) { g.fillStyle = '#0c0f13'; g.fillRect(x(n), 14, w - x(n), 24); }
   // ticks
-  const step = { 24: 3 * 3600, 6: 3600, 1: 600 }[st.zoom];
+  const step = { 24: 3 * 3600, 6: 3600, 1: 600, 0.25: 120 }[st.zoom];
   g.fillStyle = '#8b96a3'; g.font = '11px system-ui'; g.textAlign = 'center';
+  let lastLabel = -1e9;
   for (let t = Math.ceil(a / step) * step; t <= b; t += step) {
-    g.fillRect(x(t), 38, 1, 5);
-    g.fillText(fmtHM(t), Math.min(w - 16, Math.max(16, x(t))), 54);
+    const xt = x(t);
+    if (xt < -1 || xt > w + 1) continue;
+    g.fillRect(xt, 38, 1, 5);                                  // tick mark at the true position
+    if (xt >= 20 && xt <= w - 20 && xt - lastLabel >= 46) {    // label only if it fits and won't overlap
+      g.fillText(fmtHM(t), xt, 54); lastLabel = xt;
+    }
   }
   // playhead
   const p = st.wall;
   if (p && p >= a && p <= b) {
     g.fillStyle = st.mode === 'vod' ? '#fff' : '#ff4d5e';
     g.fillRect(x(p) - 1, 8, 2, 36);
-    g.beginPath(); g.arc(x(p), 8, 4, 0, 7); g.fill();
+    g.beginPath(); g.arc(x(p), 8, 6, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1.5; g.stroke();
   }
 }
 function barTime(ev) {
   const r = bar.getBoundingClientRect(), [a, b] = view();
   return a + Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * (b - a);
 }
-let dragging = false;
-bar.addEventListener('pointerdown', e => { dragging = true; bar.setPointerCapture(e.pointerId); st.wall = barTime(e); draw(); });
-bar.addEventListener('pointermove', e => { if (dragging) { st.wall = barTime(e); draw(); updateClock(st.wall); } });
-bar.addEventListener('pointerup', e => { if (!dragging) return; dragging = false; const t = barTime(e); st.center = t; seekWall(t); });
+// Consistent at every zoom level:
+//  - the playhead is a draggable handle: grab it and drag to seek. A tap elsewhere never moves it.
+//  - drag anywhere else (or scroll/wheel) pans the view window; it does not touch the playhead.
+// (24h shows the whole day, so there is nothing to pan there.)
+let mode = null, startX = 0, startCenter = 0, pannedAt = 0;
+const PAN_TH = 10;    // px of movement before an off-handle drag becomes a pan
+const GRAB_PX = 22;   // how close to the playhead counts as grabbing it
+function clampCenter(c) {
+  if (st.zoom === 24) return st.center;        // whole day shown: nothing to pan
+  const span = st.zoom * 3600, d0 = dayStart(st.day);
+  return Math.max(d0 + span / 2, Math.min(c, d0 + 86400 - span / 2));
+}
+function playheadX() {                          // screen x of the playhead within the bar, or null
+  const [a, b] = view(), p = st.wall;
+  return (p != null && p >= a && p <= b) ? (p - a) / (b - a) * bar.clientWidth : null;
+}
+bar.addEventListener('pointerdown', e => {
+  bar.setPointerCapture(e.pointerId);
+  startX = e.clientX; startCenter = st.center;
+  const px = playheadX(), rel = e.clientX - bar.getBoundingClientRect().left;
+  mode = (px != null && Math.abs(rel - px) <= GRAB_PX) ? 'scrub' : 'pending';
+});
+bar.addEventListener('pointermove', e => {
+  if (!mode) return;
+  const dx = e.clientX - startX;
+  if (mode === 'pending' && Math.abs(dx) > PAN_TH) mode = st.zoom === 24 ? null : 'pan';
+  if (mode === 'scrub') { st.wall = barTime(e); draw(); updateClock(st.wall); }
+  else if (mode === 'pan') {
+    st.center = clampCenter(startCenter - dx / bar.clientWidth * (st.zoom * 3600));
+    pannedAt = Date.now(); draw();
+  }
+});
+bar.addEventListener('pointerup', e => {
+  const m = mode; mode = null;
+  if (m === 'scrub') { const t = barTime(e); st.center = t; seekWall(t); }
+  // 'pan' and 'pending' (a tap) never move the playhead
+});
+bar.addEventListener('wheel', e => {
+  if (st.zoom === 24) return;                  // whole day already shown
+  e.preventDefault();
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  st.center = clampCenter(st.center + d / bar.clientWidth * (st.zoom * 3600));
+  pannedAt = Date.now(); draw();
+}, { passive: false });
 
 /* ===================== UI ===================== */
 function updateClock(t) { $('clock').textContent = t ? fmtTime(t) : '--:--:--'; }
@@ -405,13 +460,13 @@ function ui() {
   soundButton();
 }
 setInterval(() => {
-  if (dragging) return;
+  if (mode) return;   // don't fight the user while they're scrubbing or panning the timeline
   const w = wallAt(video.currentTime);
   if (w) {
     st.wall = w;
     if (dayKey(w) !== st.day && st.mode === 'vod') { st.day = dayKey(w); loadSpans(); }
     // keep the playhead in view
-    const [a, b] = view(); if (w < a || w > b) st.center = w;
+    const [a, b] = view(); if ((w < a || w > b) && Date.now() - pannedAt > 5000) st.center = w;
   }
   updateClock(st.wall);
   // a recording window nearly played out: the next window, or live
