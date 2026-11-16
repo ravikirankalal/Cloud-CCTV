@@ -166,8 +166,8 @@ function liveFrame(isKey, data) {
 function audioStart() {
   const { spawn } = require("child_process");
   const a = amux = spawn("ffmpeg", ["-nostdin", "-v", "error",
-    "-use_wallclock_as_timestamps", "1", "-f", "aac", "-i", "pipe:0",
-    "-af", "aresample=async=1", "-c:a", "aac", "-b:a", "24k",
+    "-f", "aac", "-i", "pipe:0",   // timed by the frames themselves: arrival times jitter, and
+    "-c:a", "aac", "-b:a", "24k",  // resampling to them put a gap in every piece of sound
     "-f", "mp4", "-frag_duration", "200000", "-movflags", "empty_moov+default_base_moof",
     "-flush_packets", "1", "pipe:1"], { stdio: ["pipe", "pipe", "inherit"] });
   for (const st of [a.stdin, a.stdout]) st.on("error", () => {});
