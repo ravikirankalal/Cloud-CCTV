@@ -280,7 +280,7 @@ function hlsLoad(url, onReady, opts = {}) {
 function hlsLive() {
   stopAll(); st.mode = 'hlslive';
   message('Loading live…', true);
-  hlsLoad(`/api/live.m3u8?stream=${STREAM}`, () => { message(''); video.play().catch(() => {}); }, { liveSyncDurationCount: 2 });
+  hlsLoad(`/api/live.m3u8?stream=${STREAM}`, () => { message(''); video.play().catch(() => {}); }, { liveSyncDurationCount: 1 });
   ui();
 }
 // wall-clock time <-> media time, from the fragments' PROGRAM-DATE-TIMEs

@@ -21,7 +21,9 @@ deleted until it has MIN_FREE_GB + 5.
 """
 import os
 import re
+import select
 import shutil
+import struct
 import signal
 import sqlite3
 import subprocess
@@ -39,7 +41,8 @@ STREAM_ID = os.environ.get("HD_STREAM_ID", "2")
 MIN_FREE_GB = float(os.environ.get("MIN_FREE_GB", "25"))
 SOURCE = os.environ.get("HD_SOURCE", os.path.join(HERE, "camera_stream.js"))
 LIVE_SOCK = os.environ.get("HD_LIVE_SOCK", "")  # empty: no live relay
-RETRY = 2
+BACKOFF = [2, 5, 10, 15, 30]  # seconds between attempts after quick failures (the cloud refuses
+                              # a new session for a while after one ends)
 
 stopping = False
 src = None
@@ -61,6 +64,13 @@ CREATE TABLE IF NOT EXISTS segments (
   bytes   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS seg_time ON segments(stream, start);
+-- one row per source run that recorded something; seq only ever grows (the live playlist's
+-- DISCONTINUITY-SEQUENCE), even when retention deletes old runs' segments
+CREATE TABLE IF NOT EXISTS runs (
+  seq     INTEGER PRIMARY KEY AUTOINCREMENT,
+  run     INTEGER NOT NULL UNIQUE,
+  stream  TEXT NOT NULL
+);
 """
 
 
@@ -92,10 +102,78 @@ def parse_playlist(text):
     return out
 
 
-def indexer(stream, run, playlist, done):
+# ---------- segment timing from the media itself ----------
+
+def _boxes(b, start=0, end=None):
+    end = len(b) if end is None else end
+    i = start
+    while i + 8 <= end:
+        size, kind = struct.unpack(">I4s", b[i:i + 8])
+        if size == 1:
+            size = struct.unpack(">Q", b[i + 8:i + 16])[0]
+        if size < 8 or i + size > end:
+            return
+        yield kind.decode("latin1"), i, i + size
+        i += size
+
+
+def _child(b, path, start=0, end=None):
+    """(start, end) of the first box along path, e.g. ["moov", "trak"]; None if missing."""
+    for kind, s, e in _boxes(b, start, end):
+        if kind == path[0]:
+            return (s, e) if len(path) == 1 else _child(b, path[1:], s + 8, e)
+    return None
+
+
+def video_timescale(init_path):
+    """the timescale of the init segment's first track (video)."""
+    b = open(init_path, "rb").read()
+    mdhd = _child(b, ["moov", "trak", "mdia", "mdhd"])
+    s = mdhd[0] + 8
+    return struct.unpack(">I", b[s + 20:s + 24] if b[s] == 1 else b[s + 12:s + 16])[0]
+
+
+def first_tfdt(seg_path, track=1):
+    """the base media decode time of a segment's first fragment, for the given track."""
+    b = open(seg_path, "rb").read(65536)
+    for kind, s, e in _boxes(b):
+        if kind != "moof":
+            continue
+        for k2, ts, te in _boxes(b, s + 8, e):
+            if k2 != "traf":
+                continue
+            tfhd = _child(b, ["tfhd"], ts + 8, te)
+            if not tfhd or struct.unpack(">I", b[tfhd[0] + 12:tfhd[0] + 16])[0] != track:
+                continue
+            tfdt = _child(b, ["tfdt"], ts + 8, te)
+            if tfdt:
+                v = tfdt[0] + 8
+                return struct.unpack(">Q", b[v + 4:v + 12])[0] if b[v] == 1 else struct.unpack(">I", b[v + 4:v + 8])[0]
+        return None
+    return None
+
+
+def indexer(stream, run, playlist, done, t0_file):
     conn = db()
     base = os.path.dirname(playlist)
     seen = set()
+    timing = {}  # t0: wall time of the first frame; scale, tfdt0: the first segment's media time
+
+    def start_of(full, init_full, fallback):
+        """wall-clock start: the first frame's time + the segment's media time since then.
+        ffmpeg's PROGRAM-DATE-TIME (the fallback) runs ~5 s late."""
+        try:
+            if "t0" not in timing:
+                timing["t0"] = float(open(t0_file).read())
+            if "scale" not in timing:
+                timing["scale"] = video_timescale(init_full)
+            d = first_tfdt(full)
+            if d is None:
+                return fallback
+            timing.setdefault("tfdt0", d)
+            return timing["t0"] + (d - timing["tfdt0"]) / timing["scale"]
+        except (OSError, ValueError, TypeError, struct.error):
+            return fallback
 
     def scan():
         try:
@@ -111,9 +189,11 @@ def indexer(stream, run, playlist, done):
             except FileNotFoundError:
                 continue
             seen.add(uri)
+            init_full = os.path.normpath(os.path.join(base, init))
+            start = start_of(full, init_full, start)
+            conn.execute("INSERT OR IGNORE INTO runs(run, stream) VALUES(?,?)", (run, stream))
             conn.execute("INSERT OR IGNORE INTO segments(stream,start,dur,path,init,run,bytes) VALUES(?,?,?,?,?,?,?)",
-                         (stream, start, dur, os.path.relpath(full, DATA),
-                          os.path.relpath(os.path.normpath(os.path.join(base, init)), DATA), run, size))
+                         (stream, start, dur, os.path.relpath(full, DATA), os.path.relpath(init_full, DATA), run, size))
         conn.commit()
 
     while not done.is_set():
@@ -137,11 +217,12 @@ def retention(stop_evt):
         target = MIN_FREE_GB + 5
         while free_gb() < target:
             # the oldest hour that has segments
-            row = conn.execute("SELECT stream, path FROM segments ORDER BY start LIMIT 1").fetchone()
+            row = conn.execute("SELECT stream, path FROM segments ORDER BY stream, start LIMIT 1").fetchone()
             if not row:
                 break
             hour_dir = os.path.dirname(row[1])  # <stream>/<day>/<HH>
-            conn.execute("DELETE FROM segments WHERE path LIKE ?", (hour_dir + "/%",))
+            # a path range (uses the path index; LIKE read the whole table)
+            conn.execute("DELETE FROM segments WHERE path >= ? AND path < ?", (hour_dir + "/", hour_dir + "0"))
             conn.commit()
             shutil.rmtree(os.path.join(DATA, hour_dir), ignore_errors=True)
             day_dir = os.path.dirname(os.path.join(DATA, hour_dir))
@@ -173,12 +254,24 @@ def run_once(device, stream):
     if os.path.exists(playlist):
         os.remove(playlist)
 
-    env = {**os.environ}
+    t0_file = os.path.join(sdir, "run.t0")
+    if os.path.exists(t0_file):
+        os.remove(t0_file)
+    env = {**os.environ, "REC_T0_FILE": t0_file}
     if LIVE_SOCK:
         env["HD_LIVE_SOCK"] = LIVE_SOCK
     else:
         env.pop("HD_LIVE_SOCK", None)
     src = subprocess.Popen(["node", SOURCE, device, STREAM_ID], stdout=subprocess.PIPE, env=env)
+    # ffmpeg only once the camera sends something (a failed connect otherwise leaves it erroring)
+    while not stopping and src.poll() is None:
+        if select.select([src.stdout], [], [], 1)[0]:
+            break
+    if stopping or src.poll() is not None:
+        src.wait()
+        log(f"run {run}: no stream (source {src.returncode})")
+        return 0
+    started = time.time()
 
     seg_pattern = os.path.join(sdir, "%Y-%m-%d", "%H", "seg-%s.m4s")
     rec = subprocess.Popen(
@@ -195,13 +288,14 @@ def run_once(device, stream):
     src.stdout.close()
 
     done = threading.Event()
-    t = threading.Thread(target=indexer, args=(stream, run, playlist, done), daemon=True)
+    t = threading.Thread(target=indexer, args=(stream, run, playlist, done, t0_file), daemon=True)
     t.start()
     src.wait()
     rec.wait()
     done.set()
     t.join(10)
-    log(f"run {run} ended (source {src.returncode}, ffmpeg {rec.returncode})")
+    log(f"run {run} ended after {time.time() - started:.0f} s (source {src.returncode}, ffmpeg {rec.returncode})")
+    return time.time() - started
 
 
 def stop(*_):
@@ -220,10 +314,12 @@ def main():
     db().close()
     stop_evt = threading.Event()
     threading.Thread(target=retention, args=(stop_evt,), daemon=True).start()
+    fails = 0
     while not stopping:
-        run_once(device, stream)
+        lasted = run_once(device, stream)
+        fails = 0 if lasted > 120 else fails + 1  # a run that recorded a while resets the back-off
         if not stopping:
-            time.sleep(RETRY)
+            time.sleep(BACKOFF[min(fails, len(BACKOFF)) - 1] if fails else BACKOFF[0])
     stop_evt.set()
 
 

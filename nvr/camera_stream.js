@@ -28,6 +28,7 @@ const JS = path.join(__dirname, "truecloud");
 const cfg = JSON.parse(fs.readFileSync(process.argv[2], "utf8"));
 const STREAM = +(process.argv[3] || 1);
 const CONNECT_S = 40;   // give up if no video this long after starting
+const REREQUEST_S = 6;  // no video this long: ask for the stream again
 const QUIET_S = 20;     // ... or if video stops this long (a slow link stalls for seconds: wait it out;
                         // reconnecting costs 20-30 s, and the 10-min cut-off is renewed away)
 const [pid, did, secret] = cfg.dev.split(":");
@@ -50,17 +51,18 @@ const RENEW_S = 240;  // ask for the stream again this often (see onopenstream)
 let renew = null;
 // once a minute: frames and bytes received, and how far the camera's frame clock has fallen
 // behind ours since the start (the cloud relay delivers late when it can't keep up)
-const stats = { n: 0, bytes: 0, ts: null, ts0: null, wall0: null };
+const stats = { n: 0, bytes: 0, ts: null, ts0: null, wall0: null, sound: 0, silent: 0, dropped: 0 };
 setInterval(() => {
   if (stats.ts0 == null) return;
   const behind = ((Date.now() - stats.wall0) - (stats.ts - stats.ts0)) / 1000;
-  log(`camera_stream: ${stats.n} frames, ${(stats.bytes * 8 / 60e3).toFixed(0)} kbit/s; longest stall ${(loopDelay.max / 1e6).toFixed(0)} ms; ` +
+  log(`camera_stream: ${stats.n} frames, ${stats.sound} sound (+${stats.silent} silent, -${stats.dropped} dropped), ` +
+      `${(stats.bytes * 8 / 60e3).toFixed(0)} kbit/s, ${behind.toFixed(1)} s behind the camera; longest stall ${(loopDelay.max / 1e6).toFixed(0)} ms; ` +
       `recorder queue ${(videoOut.writableLength / 1e6).toFixed(1)} MB, dropped ${outs.video.dropped}; ` +
       `relay queue ${mux ? (mux.stdin.writableLength / 1e6).toFixed(1) : 0} MB`);
   loopDelay.reset(); outs.video.dropped = 0;
-  stats.n = 0; stats.bytes = 0;
+  stats.n = 0; stats.bytes = 0; stats.sound = stats.silent = stats.dropped = 0;
 }, 60000);
-let started = false, last = Date.now();
+let started = false, last = Date.now(), rerequested = false;
 
 // ---- the live relay: frames into fragmented MP4 (a small ffmpeg, no re-encoding: 200 ms
 // fragments), sent to the browsers watching over a WebSocket, which play it with Media Source
@@ -192,9 +194,8 @@ function audioStart() {
   });
 }
 function liveAudio(data) { if (amux && mux?.t0 != null) amux.stdin.write(Buffer.from(data)); }
-if (process.env.HD_LIVE_SOCK || process.env.HD_LIVE_PORT) {
-  liveStart();
-  audioStart();
+const LIVE = !!(process.env.HD_LIVE_SOCK || process.env.HD_LIVE_PORT);
+if (LIVE) {
   const http = require("http");
   const server = http.createServer((req, res) => { res.writeHead(426); res.end(); });
   const wss = new WebSocket.Server({ server, perMessageDeflate: false });
@@ -226,6 +227,48 @@ function feed(o, buf, isKey) {
 }
 const { monitorEventLoopDelay } = require("perf_hooks");
 const loopDelay = monitorEventLoopDelay({ resolution: 20 }); loopDelay.enable();
+// ---- sound: laid end to end on its own sample clock (1024 samples per AAC frame), the way MP4
+// stores it anyway: where the camera skipped frames (a jump in its frame clock), silent frames
+// fill the hole, and if the sound still drifts more than 1 s from the picture's clock (arrival
+// times), silence brings it back level, or frames are dropped while it's ahead. Without this a
+// lost stretch of sound slid everything after it earlier, by up to minutes.
+const sound = { pts: null, ts: null, sil: undefined, step: 0, ms: 0 };
+function adtsInfo(b) {
+  const rates = [96000, 88200, 64000, 48000, 44100, 32000, 24000, 22050, 16000, 12000, 11025, 8000, 7350];
+  return { rate: rates[(b[2] >> 2) & 15] || 8000, ch: ((b[2] & 1) << 2) | (b[3] >> 6) || 1 };
+}
+function silentFrame(b) {  // one silent AAC frame (ADTS) in the camera's format, made by ffmpeg once
+  const { rate, ch } = adtsInfo(b);
+  try {
+    const r = require("child_process").spawnSync("ffmpeg", ["-nostdin", "-v", "error", "-f", "lavfi", "-i",
+      `anullsrc=r=${rate}:cl=${ch > 1 ? "stereo" : "mono"}`, "-t", "1", "-c:a", "aac", "-b:a", "24k", "-f", "adts", "pipe:1"]);
+    const frames = [];
+    for (let i = 0; i + 7 <= r.stdout.length;) { const n = ((r.stdout[i + 3] & 3) << 11) | (r.stdout[i + 4] << 3) | (r.stdout[i + 5] >> 5); if (n < 7) break; frames.push(r.stdout.subarray(i, i + n)); i += n; }
+    return frames.length > 4 ? Buffer.from(frames[4]) : null;  // past the encoder's start-up frames
+  } catch { return null; }
+}
+function soundFrames(data, camTs) {  // -> [[ADTS frame, 90 kHz time], ...]
+  const d = Buffer.from(data), wall = TS.now(), out = [];
+  if (wall == null || d.length < 7) return out;
+  if (sound.sil === undefined) {
+    sound.sil = silentFrame(d);
+    const { rate } = adtsInfo(d); sound.step = 1024 / rate * 90000; sound.ms = 1024 / rate * 1000;
+  }
+  let fill = 0;
+  if (sound.pts != null) {
+    if (sound.ts != null && camTs > sound.ts) fill = Math.round((camTs - sound.ts) / sound.ms) - 1;  // frames the camera skipped
+    if (fill > 300) fill = 0;                                                            // a clock jump, not a gap
+    const ahead = sound.pts + (fill + 1) * sound.step - wall;
+    if (ahead < -90000) fill += Math.floor(-ahead / sound.step);                         // > 1 s behind: catch up
+    else if (ahead > 90000 && fill === 0) { sound.ts = camTs; stats.dropped++; return out; } // > 1 s ahead: drop
+  }
+  sound.ts = camTs;
+  if (sound.pts == null) sound.pts = wall - sound.step;
+  for (let i = 0; i < Math.min(fill, 1000) && sound.sil; i++) { out.push([sound.sil, Math.round(sound.pts += sound.step)]); stats.silent++; }
+  out.push([d, Math.round(sound.pts += sound.step)]); stats.sound++;
+  return out;
+}
+
 // ---- the recording stream: MPEG-TS, H.265 (PID 0x100) and AAC ADTS (PID 0x101). Timestamps
 // are arrival times on one clock (so sound stays with the picture), spaced at least a frame
 // apart: frames come from the cloud in bursts.
@@ -273,7 +316,13 @@ const TS = (() => {
   const last = { v: -Infinity, a: -Infinity };
   const STEP = { v: 0.06 * 90000, a: 1024 / 8000 * 90000 };  // the least spacing: 60 ms, an AAC frame
   function stamp(kind) {
-    if (t0 == null) t0 = Date.now();
+    if (t0 == null) {
+      t0 = Date.now();
+      // the wall-clock time of the first frame (a key frame: the first segment starts with it);
+      // the recorder times segments from it (ffmpeg's own PROGRAM-DATE-TIME comes ~5 s late,
+      // after it has probed the input)
+      if (process.env.REC_T0_FILE) fs.writeFileSync(process.env.REC_T0_FILE, String(t0 / 1000));
+    }
     const t = Math.max(Math.round((Date.now() - t0) * 90) + 90000, Math.round(last[kind] + STEP[kind]));
     last[kind] = t;
     return t;
@@ -285,9 +334,9 @@ const TS = (() => {
       const pkts = packets(VPID, pes, t);
       return Buffer.concat(isKey ? [...packets(0, PAT), ...packets(PMT_PID, PMT), ...pkts] : pkts);
     },
-    audio(data) {
-      if (t0 == null) return null;
-      const t = stamp("a"), d = Buffer.from(data), len = 3 + 5 + d.length;
+    now: () => t0 == null ? null : Math.round((Date.now() - t0) * 90) + 90000,
+    audio(d, t) {
+      const len = 3 + 5 + d.length;
       const pes = Buffer.concat([Buffer.from([0, 0, 1, 0xc0, len >> 8, len & 0xff, 0x80, 0x80, 5, ...pts5(t)]), d]);
       return Buffer.concat(packets(APID, pes));
     },
@@ -297,9 +346,10 @@ self.postMessage = ({ message, data }) => {
   if (message === "onrecvframeex") {
     if (data.frametype === 0) {                                      // audio (AAC, ADTS)
       if (!started || !data.enc.startsWith("AAC")) return;           // from the first video frame
-      const a = TS.audio(data.frameData);
-      if (a) feed(outs.video, a, false);
-      liveAudio(data.frameData);
+      for (const [d, t] of soundFrames(data.frameData, data.timestamp)) {
+        feed(outs.video, TS.audio(d, t), false);
+        if (d !== sound.sil) liveAudio(d);  // live: real sound only (it plays as it comes; the silence is for the recording's timeline)
+      }
       return;
     }
     if (data.frametype !== 1 && data.frametype !== 2) return;      // video
@@ -307,7 +357,9 @@ self.postMessage = ({ message, data }) => {
       if (data.frametype !== 1) return;                              // start on a key frame
       started = true;
       log(`camera_stream: ${data.enc} ${data.width}x${data.height} @${data.fps}fps`);
+      if (LIVE) { liveStart(); audioStart(); }
     }
+    if (rerequested) { log(`camera_stream: video back ${((Date.now() - last) / 1000).toFixed(1)} s after the stall`); rerequested = false; }
     last = Date.now();
     stats.n++; stats.bytes += data.datalen; stats.ts = data.timestamp;
     if (stats.ts0 == null) { stats.ts0 = data.timestamp; stats.wall0 = Date.now(); }
@@ -340,5 +392,12 @@ setTimeout(() => {
 const t0 = Date.now();
 setInterval(() => {
   if (!started && Date.now() - t0 > CONNECT_S * 1000) quit("no video");
+  // a stall: ask for the stream again in this session first (reconnecting takes ~50 s: the
+  // cloud refuses a new session for a while), and give up only if that brings nothing
+  if (started && !rerequested && Date.now() - last > REREQUEST_S * 1000) {
+    rerequested = true;
+    log(`camera_stream: no video for ${REREQUEST_S} s, asking for the stream again`);
+    send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM });
+  }
   if (started && Date.now() - last > QUIET_S * 1000) quit("video stopped");
 }, 1000);

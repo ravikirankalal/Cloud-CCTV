@@ -32,7 +32,10 @@ PORT = int(os.environ.get("PORT", "3400"))
 MEDIA = "/media/"          # where nginx serves DATA
 STREAMS = {"cam1": "Guttedar Nilaya"}
 GAP = 2.0                  # seconds: a smaller hole between segments isn't a gap
-LIVE_SEGS = 6
+LIVE_SEGS = 4
+LIVE_TARGET = 15          # fixed TARGETDURATION for live (segments run up to ~13 s: the camera's
+                          # key frames are 10 s apart); it mustn't change between reloads
+MAX_SEG = 60              # no segment is longer: lets time-range queries use the index both ways
 MAX_VOD = 24 * 3600        # longest playlist
 MAX_EXPORT = 3600          # longest export
 
@@ -49,12 +52,12 @@ def pdt(t):
 
 def segments(stream, t0, t1):
     with db() as c:
-        return c.execute("SELECT start, dur, path, init, run FROM segments WHERE stream=? AND start+dur>? AND start<? "
-                         "ORDER BY start", (stream, t0, t1)).fetchall()
+        return c.execute("SELECT start, dur, path, init, run FROM segments WHERE stream=? AND start>? AND start<? "
+                         "AND start+dur>? ORDER BY start", (stream, t0 - MAX_SEG, t1, t0)).fetchall()
 
 
 def playlist(rows, live=False, seq=0, dseq=0):
-    tgt = max([math.ceil(r["dur"]) for r in rows] or [10])
+    tgt = max([math.ceil(r["dur"]) for r in rows] + [LIVE_TARGET if live else 10])
     out = ["#EXTM3U", "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{tgt}", "#EXT-X-INDEPENDENT-SEGMENTS"]
     if live:
         out.append(f"#EXT-X-MEDIA-SEQUENCE:{seq}")
@@ -139,17 +142,22 @@ class H(BaseHTTPRequestHandler):
                 with db() as c:
                     rows = c.execute("SELECT id, start, dur, path, init, run FROM segments WHERE stream=? "
                                      "ORDER BY start DESC LIMIT ?", (s, LIVE_SEGS)).fetchall()[::-1]
-                    # discontinuities before the window: one per earlier source run
-                    dseq = rows and c.execute("SELECT count(DISTINCT run) FROM segments WHERE stream=? AND run<?",
-                                              (s, rows[0]["run"])).fetchone()[0]
+                    # discontinuities before the window: the runs table's seq only ever grows
+                    # (counting the runs still on disk went down when retention deleted one)
+                    dseq = 0
+                    if rows:
+                        r0 = c.execute("SELECT seq FROM runs WHERE run=?", (rows[0]["run"],)).fetchone()
+                        dseq = r0["seq"] if r0 else 0
                 if not rows or time.time() - (rows[-1]["start"] + rows[-1]["dur"]) > 60:
                     return self.err(503, "the HD stream is down")
                 return self.send(200, playlist(rows, live=True, seq=rows[0]["id"], dseq=dseq),
                                  "application/vnd.apple.mpegurl")
             if u.path == "/api/status":
                 with db() as c:
-                    r = c.execute("SELECT max(start+dur) AS last, min(start) AS first, count(*) AS n, "
-                                  "sum(bytes) AS bytes FROM segments").fetchone()
+                    r = dict(c.execute("SELECT count(*) AS n, sum(bytes) AS bytes FROM segments").fetchone())
+                    newest = c.execute("SELECT start+dur FROM segments ORDER BY start DESC LIMIT 1").fetchone()
+                    oldest = c.execute("SELECT start FROM segments ORDER BY start LIMIT 1").fetchone()
+                    r["last"], r["first"] = newest and newest[0], oldest and oldest[0]
                 du = shutil.disk_usage(DATA)
                 return self.send(200, json.dumps({
                     "newest": r["last"], "oldest": r["first"], "segments": r["n"], "bytes": r["bytes"],
@@ -162,33 +170,46 @@ class H(BaseHTTPRequestHandler):
             return self.err(400, str(e))
 
     def export(self, stream, t0, t1):
+        """The stored segments covering [t0, t1], whole (so it starts on a key frame: up to ~10 s
+        early), as one MP4 without re-encoding. Each source run (its own init segment and
+        timeline) is joined into a file of its own, and ffmpeg's concat demuxer puts the runs
+        end to end; cutting mid-segment gave a broken start, and one playlist across runs gave
+        non-increasing timestamps."""
         rows = segments(stream, t0, t1)
         if not rows:
             return self.err(404, "no recording in that range")
-        # a local playlist of the files; ffmpeg joins them without re-encoding
-        text = playlist(rows).replace(f'URI="{MEDIA}', f'URI="{DATA}/').replace(f"\n{MEDIA}", f"\n{DATA}/")
-        with tempfile.NamedTemporaryFile("w", suffix=".m3u8", delete=False) as f:
-            f.write(text)
-        name = f"{stream}_{datetime.fromtimestamp(t0).strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
-        self.send_response(200)
-        self.send_header("Content-Type", "video/mp4")
-        self.send_header("Content-Disposition", f'attachment; filename="{name}"')
-        self.send_header("Cache-Control", "no-store")
-        self.end_headers()
-        p = subprocess.Popen(["ffmpeg", "-nostdin", "-v", "error", "-allowed_extensions", "ALL",
-                              "-protocol_whitelist", "file", "-i", f.name,
-                              "-ss", str(max(0, t0 - rows[0]["start"])), "-t", str(t1 - t0),
-                              "-c", "copy", "-tag:v", "hvc1",
-                              "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-"],
-                             stdout=subprocess.PIPE)
+        tmp = tempfile.mkdtemp(prefix="export-", dir=os.path.join(DATA, "tmp") if os.path.isdir(os.path.join(DATA, "tmp")) else None)
         try:
-            shutil.copyfileobj(p.stdout, self.wfile, 256 * 1024)
-        except (BrokenPipeError, ConnectionResetError):
-            p.kill()
+            parts, cur = [], None
+            for r in rows:
+                if cur is None or r["run"] != cur[0]:
+                    cur = (r["run"], os.path.join(tmp, f"part{len(parts)}.mp4"))
+                    parts.append(cur)
+                    with open(cur[1], "wb") as out, open(os.path.join(DATA, r["init"]), "rb") as f:
+                        shutil.copyfileobj(f, out)
+                with open(cur[1], "ab") as out, open(os.path.join(DATA, r["path"]), "rb") as f:
+                    shutil.copyfileobj(f, out)
+            lst = os.path.join(tmp, "list.txt")
+            with open(lst, "w") as f:
+                f.writelines(f"file '{path}'\n" for _, path in parts)
+            name = f"{stream}_{datetime.fromtimestamp(rows[0]['start']).strftime('%Y-%m-%d_%H-%M-%S')}.mp4"
+            self.send_response(200)
+            self.send_header("Content-Type", "video/mp4")
+            self.send_header("Content-Disposition", f'attachment; filename="{name}"')
+            self.send_header("Cache-Control", "no-store")
+            self.end_headers()
+            p = subprocess.Popen(["ffmpeg", "-nostdin", "-v", "error", "-f", "concat", "-safe", "0", "-i", lst,
+                                  "-c", "copy", "-tag:v", "hvc1",
+                                  "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "-"],
+                                 stdout=subprocess.PIPE)
+            try:
+                shutil.copyfileobj(p.stdout, self.wfile, 256 * 1024)
+            except (BrokenPipeError, ConnectionResetError):
+                p.kill()
+            finally:
+                p.wait()
         finally:
-            p.wait()
-            os.unlink(f.name)
-
+            shutil.rmtree(tmp, ignore_errors=True)
 
 if __name__ == "__main__":
     ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
