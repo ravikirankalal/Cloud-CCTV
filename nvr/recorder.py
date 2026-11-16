@@ -4,7 +4,7 @@ HD recorder: one camera's HD stream, stored as fMP4 HLS segments and indexed in 
 
     python3 recorder.py DEVICE.json [stream=cam1]          (nvr-recorder.service)
 
-hd_source.js (from the TrueCloud cloud) writes H.265 + AAC as MPEG-TS to stdout, and also relays
+camera_stream.js (from the TrueCloud cloud) writes H.265 + AAC as MPEG-TS to stdout, and also relays
 frames live over HD_LIVE_SOCK for the zero-delay WebSocket view. ffmpeg copies the stream,
 without re-encoding, into keyframe-aligned fMP4 segments:
 
@@ -37,7 +37,7 @@ TZ_NAME = os.environ.get("REC_TZ", "Asia/Kolkata")
 TZ = ZoneInfo(TZ_NAME)
 STREAM_ID = os.environ.get("HD_STREAM_ID", "2")
 MIN_FREE_GB = float(os.environ.get("MIN_FREE_GB", "25"))
-SOURCE = os.environ.get("HD_SOURCE", os.path.join(HERE, "hd_source.js"))
+SOURCE = os.environ.get("HD_SOURCE", os.path.join(HERE, "camera_stream.js"))
 LIVE_SOCK = os.environ.get("HD_LIVE_SOCK", "")  # empty: no live relay
 RETRY = 2
 

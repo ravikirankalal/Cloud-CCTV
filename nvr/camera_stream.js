@@ -5,7 +5,7 @@
 // with the device key, open the stream. Exits (non-zero) when the link fails or goes quiet;
 // recorder.py starts it again.
 //
-//   node hd_source.js DEVICE.json [streamid=1]
+//   node camera_stream.js DEVICE.json [streamid=1]
 // DEVICE.json: {"dev": "productId:deviceId:deviceSecret", "user", "pwd", "ngw", "port", "https"}
 // (saved from the portal, see experiments/truecloud/grab-device.js). Stream 1 = HD (2304x1296
 // H.265 on the Common camera), 0 = SD (800x448 H.264, what RTMP sends).
@@ -34,7 +34,7 @@ const [pid, did, secret] = cfg.dev.split(":");
 
 const log = (...a) => process.stderr.write(a.join(" ") + "\n");
 console.log = console.error = console.warn = console.info = () => {};
-const quit = (why, code = 1) => { log("hd_source:", why); process.exit(code); };
+const quit = (why, code = 1) => { log("camera_stream:", why); process.exit(code); };
 
 const self = globalThis;
 self.self = self;
@@ -54,7 +54,7 @@ const stats = { n: 0, bytes: 0, ts: null, ts0: null, wall0: null };
 setInterval(() => {
   if (stats.ts0 == null) return;
   const behind = ((Date.now() - stats.wall0) - (stats.ts - stats.ts0)) / 1000;
-  log(`hd_source: ${stats.n} frames, ${(stats.bytes * 8 / 60e3).toFixed(0)} kbit/s; longest stall ${(loopDelay.max / 1e6).toFixed(0)} ms; ` +
+  log(`camera_stream: ${stats.n} frames, ${(stats.bytes * 8 / 60e3).toFixed(0)} kbit/s; longest stall ${(loopDelay.max / 1e6).toFixed(0)} ms; ` +
       `recorder queue ${(videoOut.writableLength / 1e6).toFixed(1)} MB, dropped ${outs.video.dropped}; ` +
       `relay queue ${mux ? (mux.stdin.writableLength / 1e6).toFixed(1) : 0} MB`);
   loopDelay.reset(); outs.video.dropped = 0;
@@ -171,7 +171,7 @@ function audioStart() {
     "-f", "mp4", "-frag_duration", "200000", "-movflags", "empty_moov+default_base_moof",
     "-flush_packets", "1", "pipe:1"], { stdio: ["pipe", "pipe", "inherit"] });
   for (const st of [a.stdin, a.stdout]) st.on("error", () => {});
-  a.on("exit", () => { if (amux === a) { amux = null; ainit = null; log("hd_source: live sound stopped"); } });  // the picture carries on
+  a.on("exit", () => { if (amux === a) { amux = null; ainit = null; log("camera_stream: live sound stopped"); } });  // the picture carries on
   let buf = Buffer.alloc(0), head = [];
   a.stdout.on("data", d => {
     buf = buf.length ? Buffer.concat([buf, d]) : d;
@@ -306,7 +306,7 @@ self.postMessage = ({ message, data }) => {
     if (!started) {
       if (data.frametype !== 1) return;                              // start on a key frame
       started = true;
-      log(`hd_source: ${data.enc} ${data.width}x${data.height} @${data.fps}fps`);
+      log(`camera_stream: ${data.enc} ${data.width}x${data.height} @${data.fps}fps`);
     }
     last = Date.now();
     stats.n++; stats.bytes += data.datalen; stats.ts = data.timestamp;
@@ -323,8 +323,8 @@ self.postMessage = ({ message, data }) => {
     if (data.code !== 0) quit(`open stream failed (${data.code})`);
     // the cloud ends a stream ~10 min after it's opened: ask for it again well before (an
     // experiment: does that keep it going without a gap?)
-    if (!renew) { renew = setInterval(() => { log("hd_source: renewing the stream"); send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM }); }, RENEW_S * 1000); }
-    else log(`hd_source: stream renewed (code ${data.code})`);
+    if (!renew) { renew = setInterval(() => { log("camera_stream: renewing the stream"); send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM }); }, RENEW_S * 1000); }
+    else log(`camera_stream: stream renewed (code ${data.code})`);
   } else if (message === "ondisconnect") {
     quit(`disconnected (${data.code})`);
   }

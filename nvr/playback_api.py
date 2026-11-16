@@ -2,7 +2,7 @@
 """
 NVR API: playlists, coverage and exports, all from the recorder's SQLite index.
 
-    python3 api.py            (nvr-api.service; listens on 127.0.0.1:PORT, nginx in front)
+    python3 playback_api.py            (nvr-playback.service; listens on 127.0.0.1:PORT, nginx in front)
 
   GET /api/streams                         [{"id", "name"}]
   GET /api/coverage?stream&from&to         {"spans": [[start, end], ...]}   (epoch s; gaps < GAP s merged)
@@ -88,7 +88,7 @@ def spans(rows):
 
 
 class H(BaseHTTPRequestHandler):
-    server_version = "nvr-api"
+    server_version = "nvr-playback"
 
     def log_message(self, *a):
         pass

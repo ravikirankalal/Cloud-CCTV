@@ -152,7 +152,7 @@ function stopAll() {
 }
 
 /* ===================== live: WebSocket relay (zero delay) ===================== */
-// hd_source.js sends {"t0","audio"} then fMP4: byte 0 = 0 picture / 1 sound, rest = init or fragment
+// camera_stream.js sends {"t0","audio"} then fMP4: byte 0 = 0 picture / 1 sound, rest = init or fragment
 const RT_BEHIND = 0.4, AUD_BEHIND = 0.8;
 function rtStart() {
   stopAll();
@@ -499,7 +499,7 @@ window.startApp = () => {
 };
 </script>
 <script type="module">
-// Google sign-in (Firebase). auth_gate.js turns it into the session cookie nginx checks.
+// Google sign-in (Firebase). signin.js turns it into the session cookie nginx checks.
 import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut }
   from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';

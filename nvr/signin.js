@@ -83,4 +83,4 @@ http.createServer(async (req, res) => {
     }
     send(res, 404);
   } catch (e) { console.log('error', e); send(res, 500); }
-}).listen(PORT, '127.0.0.1', () => console.log('auth_gate on', PORT));
+}).listen(PORT, '127.0.0.1', () => console.log('signin on', PORT));
