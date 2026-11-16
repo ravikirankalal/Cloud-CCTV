@@ -7,9 +7,9 @@ Wants=network-online.target
 User=ubuntu
 WorkingDirectory=/home/ubuntu/nvr
 Environment=NVR_DATA=/home/ubuntu/nvr-data
-# until the new web front end replaces it, the live relay socket stays where the current
-# page's nginx (rtmp-server container) proxies /api/hd-live/cam1
-Environment=HD_LIVE_SOCK=/home/ubuntu/rtmp-web/run/hd-live-cam1.sock
+# the zero-delay live relay (nginx: /api/live-ws/cam1)
+Environment=HD_LIVE_SOCK=/home/ubuntu/nvr/run/hd-live-cam1.sock
+ExecStartPre=/bin/mkdir -p /home/ubuntu/nvr/run
 ExecStart=/usr/bin/python3 /home/ubuntu/nvr/recorder.py /home/ubuntu/nvr/state/hd-device.json cam1
 Restart=always
 RestartSec=5

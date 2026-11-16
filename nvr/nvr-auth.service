@@ -1,12 +1,12 @@
 [Unit]
-Description=Login check for nginx: Firebase Google sign-in -> session cookie (auth_gate.js)
+Description=NVR sign-in: Firebase Google sign-in -> session cookie for nginx (auth_gate.js)
 After=network.target
 
 [Service]
 User=ubuntu
-WorkingDirectory=/home/ubuntu/rtmp-web
+WorkingDirectory=/home/ubuntu/nvr
 Environment=AUTH_DIR=/home/ubuntu/auth
-ExecStart=/usr/bin/node /home/ubuntu/rtmp-web/auth_gate.js
+ExecStart=/usr/bin/node /home/ubuntu/nvr/auth_gate.js
 Restart=always
 RestartSec=5
 MemoryMax=80M

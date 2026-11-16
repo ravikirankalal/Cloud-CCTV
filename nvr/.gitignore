@@ -1,0 +1,5 @@
+node_modules/
+truecloud/
+state/
+run/
+__pycache__/
