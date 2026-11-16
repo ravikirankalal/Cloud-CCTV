@@ -1,0 +1,515 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c0f13">
+<title>Guttedar Nilaya</title>
+<style>
+:root{--bg:#0c0f13;--panel:#151a21;--panel2:#1c232c;--line:#27303b;--text:#e8edf2;--muted:#8b96a3;
+  --rec:#3b82f6;--live:#ff4d5e;--ok:#37b24d;--warn:#f59f00;--radius:12px;color-scheme:dark}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  -webkit-tap-highlight-color:transparent}
+button{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
+  padding:8px 12px;cursor:pointer;touch-action:manipulation}
+button:active{transform:scale(.97)}
+button[disabled]{opacity:.4;cursor:default}
+[hidden]{display:none!important}
+.app{max-width:1100px;margin:0 auto;padding:12px 16px calc(16px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+header h1{font-size:18px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
+.dot.ok{background:var(--ok)}.dot.bad{background:var(--live)}
+.acct{width:34px;height:34px;padding:0;border-radius:50%;background:#2a3340 center/cover;font-weight:700}
+/* player */
+.stage{position:relative;background:#000;border-radius:var(--radius);overflow:hidden;aspect-ratio:16/9}
+.stage video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
+.badge{position:absolute;top:10px;left:10px;display:flex;gap:6px;align-items:center;pointer-events:none}
+.pill{background:rgba(0,0,0,.6);backdrop-filter:blur(6px);padding:4px 9px;border-radius:999px;font-size:13px;
+  font-variant-numeric:tabular-nums;font-weight:600}
+.pill.live{background:var(--live)}
+.msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;color:var(--muted);
+  background:rgba(0,0,0,.55)}
+.msg b{display:block;color:var(--text);margin-bottom:4px}
+.spin{width:28px;height:28px;border:3px solid #fff3;border-top-color:#fff;border-radius:50%;animation:s 1s linear infinite;margin:0 auto 10px}
+@keyframes s{to{transform:rotate(1turn)}}
+/* controls */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
+.controls .grow{flex:1}
+.golive{background:var(--live);border-color:var(--live);font-weight:700}
+.golive.on{background:transparent;color:var(--live)}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.seg button{border:0;border-radius:0;background:var(--panel2);padding:8px 10px}
+.seg button.on{background:#2f3b4a;font-weight:700}
+/* timeline */
+.tl{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px 12px}
+.tlhead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.tlhead .day{flex:1;text-align:center;font-weight:600}
+.bar{position:relative;height:56px;touch-action:none;cursor:pointer;user-select:none}
+.bar canvas{width:100%;height:100%;display:block}
+.hint{color:var(--muted);font-size:12px;margin-top:6px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+/* login */
+.login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:var(--bg);padding:24px}
+.login-card{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%;max-width:340px;text-align:center}
+.login-card h1{margin:6px 0 0;font-size:22px}
+.login-card p{margin:0 0 14px;color:var(--muted)}
+.gbtn{display:flex;align-items:center;gap:10px;justify-content:center;width:100%;background:#fff;color:#1f1f1f;
+  border:0;padding:12px 16px;font-weight:600}
+.login-err{min-height:18px;color:var(--live);font-size:13px}
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:var(--radius);max-width:360px;width:calc(100% - 32px)}
+dialog::backdrop{background:rgba(0,0,0,.6)}
+dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+</style>
+</head>
+<body>
+<div class="app" id="app" hidden>
+  <header>
+    <span class="dot" id="health" title=""></span>
+    <h1 id="camName">Guttedar Nilaya</h1>
+    <button class="acct" id="acct" aria-label="Account"></button>
+  </header>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <audio id="audio" hidden></audio>
+    <div class="badge"><span class="pill live" id="liveTag" hidden>LIVE</span><span class="pill" id="clock">--:--:--</span></div>
+    <div class="msg" id="msg" hidden></div>
+  </div>
+
+  <div class="controls">
+    <button id="playBtn" aria-label="Play / pause">⏸</button>
+    <button id="back10" aria-label="Back 10 seconds">−10s</button>
+    <button id="fwd10" aria-label="Forward 10 seconds">+10s</button>
+    <span class="seg" id="speeds"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="4">4×</button><button data-s="8">8×</button></span>
+    <button id="soundBtn" aria-label="Sound">🔇</button>
+    <span class="grow"></span>
+    <button id="dlBtn">Download</button>
+    <button class="golive" id="liveBtn">● Live</button>
+  </div>
+
+  <div class="tl">
+    <div class="tlhead">
+      <button id="prevDay" aria-label="Previous day">‹</button>
+      <div class="day" id="dayLabel">Today</div>
+      <button id="nextDay" aria-label="Next day">›</button>
+      <span class="seg" id="zooms"><button data-z="24">24h</button><button data-z="6">6h</button><button data-z="1" class="on">1h</button></span>
+    </div>
+    <div class="bar" id="bar"><canvas id="cv"></canvas></div>
+    <div class="hint"><span>Tap or drag the bar to jump · blue = recorded</span><span id="store"></span></div>
+  </div>
+</div>
+
+<dialog id="dlg">
+  <b>Download a clip</b>
+  <div style="color:var(--muted);font-size:13px;margin-top:4px">Ending at the time shown in the player</div>
+  <div class="row" id="dlLens"><button data-m="1">1 min</button><button data-m="5">5 min</button><button data-m="15">15 min</button><button data-m="30">30 min</button></div>
+  <div class="row"><button id="dlClose">Cancel</button></div>
+</dialog>
+
+<div class="login" id="login">
+  <div class="login-card" id="loginCard" hidden>
+    <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#ff4d5e"/><circle cx="12" cy="12" r="3.2" fill="#fff"/></svg>
+    <h1>Guttedar Nilaya</h1>
+    <p>Sign in to see the camera.</p>
+    <button class="gbtn" id="gSignIn" type="button"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.7a14.5 14.5 0 010-9.4l-7.9-6.1a24 24 0 000 21.6l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Sign in with Google</button>
+    <div class="login-err" id="loginErr" role="alert"></div>
+  </div>
+</div>
+
+<script src="/assets/hls.min.js"></script>
+<script>
+/* ===================== config & helpers ===================== */
+const STREAM = 'cam1';
+const TZ = 'Asia/Kolkata';
+const $ = id => document.getElementById(id);
+const video = $('video'), audio = $('audio');
+const now = () => Date.now() / 1000;
+const fmtTime = t => new Date(t * 1000).toLocaleTimeString('en-GB', { timeZone: TZ, hour12: false });
+const fmtHM = t => new Date(t * 1000).toLocaleTimeString('en-GB', { timeZone: TZ, hour: '2-digit', minute: '2-digit', hour12: false });
+const dayKey = t => new Date(t * 1000).toLocaleDateString('en-CA', { timeZone: TZ });   // YYYY-MM-DD in IST
+const dayStart = key => Date.parse(key + 'T00:00:00+05:30') / 1000;
+const api = (p, q) => fetch(`/api/${p}?` + new URLSearchParams({ stream: STREAM, ...q }), { cache: 'no-store' });
+const HEVC = audio => `video/mp4; codecs="hvc1.1.6.L150.90${audio ? ', mp4a.40.2' : ''}"`;
+const MSE = window.ManagedMediaSource || window.MediaSource;
+const canHevcMse = !!MSE && MSE.isTypeSupported(HEVC(false));
+
+/* ===================== state ===================== */
+// mode: 'live' (WebSocket relay, ~0.4 s) | 'hlslive' (HLS live, ~20 s) | 'vod' (recordings)
+const st = { mode: null, hls: null, rt: null, frags: [], winEnd: 0, speed: 1, spans: [], day: dayKey(now()),
+             zoom: 1, center: now(), wall: null, soundOn: false, loading: 0 };
+try { st.soundOn = localStorage.getItem('sound') === 'on'; } catch {}
+
+function message(html, spin) { $('msg').innerHTML = (spin ? '<div class="spin"></div>' : '') + html; $('msg').hidden = !html; }
+
+/* ===================== teardown ===================== */
+function stopAll() {
+  if (st.hls) { st.hls.destroy(); st.hls = null; }
+  rtStop();
+  video.removeAttribute('src'); video.load();
+  st.frags = []; st.mode = null;
+}
+
+/* ===================== live: WebSocket relay (zero delay) ===================== */
+// hd_source.js sends {"t0","audio"} then fMP4: byte 0 = 0 picture / 1 sound, rest = init or fragment
+const RT_BEHIND = 0.4;
+function rtStart() {
+  stopAll();
+  st.mode = 'live';
+  const rt = st.rt = { ms: new MSE(), sb: null, q: [], last: Date.now(), t0: null, a: null, ever: false, first: Date.now() };
+  video.disableRemotePlayback = true;
+  video.src = rt.url = URL.createObjectURL(rt.ms);
+  const pump = () => {
+    if (st.rt !== rt || !rt.sb || rt.sb.updating || !rt.q.length) return;
+    const parts = rt.q.splice(0), all = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
+    let o = 0; for (const p of parts) { all.set(new Uint8Array(p), o); o += p.byteLength; }
+    try { rt.sb.appendBuffer(all); } catch { retry(); }
+  };
+  const follow = () => {
+    if (st.rt !== rt || !rt.sb || rt.sb.updating) return;
+    const b = video.buffered; if (!b.length) return;
+    const end = b.end(b.length - 1);
+    if (!video.paused || video.readyState < 2) {
+      if (end - video.currentTime > 2.5 || video.currentTime < b.start(b.length - 1)) video.currentTime = Math.max(b.start(b.length - 1), end - RT_BEHIND);
+      else video.playbackRate = end - video.currentTime > 1 ? 1.1 : 1;
+    }
+    if (video.currentTime - b.start(0) > 90) { try { rt.sb.remove(b.start(0), video.currentTime - 60); } catch {} }
+  };
+  const retry = () => { if (st.rt === rt) setTimeout(() => st.rt === rt && rtStart(), 2000); };
+  rt.ms.addEventListener('sourceopen', () => {
+    const ws = rt.ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/api/live-ws/${STREAM}`);
+    ws.binaryType = 'arraybuffer';
+    ws.onmessage = e => {
+      if (st.rt !== rt) return;
+      rt.last = Date.now();
+      if (typeof e.data === 'string') {
+        rt.ever = true;
+        if (rt.sb) return retry();          // a new stream timeline: start over
+        rt.t0 = JSON.parse(e.data).t0;
+        try { rt.sb = rt.ms.addSourceBuffer(HEVC(false)); } catch { return hlsLive(); }
+        rt.sb.mode = 'segments';
+        rt.sb.addEventListener('updateend', () => { follow(); pump(); });
+        return;
+      }
+      const kind = new Uint8Array(e.data, 0, 1)[0], data = e.data.slice(1);
+      if (kind === 1) return rtSound(rt, data);
+      rt.q.push(data); pump();
+    };
+    ws.onclose = retry;
+  }, { once: true });
+  rt.timer = setInterval(() => {
+    if (st.rt !== rt) return;
+    const quiet = Date.now() - rt.last > 6000;
+    if (quiet) message("<b>Connecting to the HD stream…</b>The camera's cloud link dropped; it usually comes back within a minute.", true);
+    else if (video.readyState >= 2) message('');
+    if (quiet && Date.now() - rt.last > 20000) return rtStart();
+    if (!rt.ever && Date.now() - rt.first > 10000) return hlsLive();          // relay unreachable from here
+    if (rt.sb && video.readyState < 2) { if ((rt.stuck = (rt.stuck || 0) + 1) > 8) hlsLive(); } else rt.stuck = 0;
+  }, 1000);
+  message('Connecting…', true);
+  video.play().catch(() => {});
+  ui();
+}
+function rtSound(rt, data) {
+  let a = rt.a;
+  if (a && new Uint8Array(data, 4, 4).every((c, i) => c === 'ftyp'.charCodeAt(i))) { rtSoundStop(rt); a = null; }
+  if (!a) {
+    if (!MSE.isTypeSupported('audio/mp4; codecs="mp4a.40.2"')) return;
+    a = rt.a = { ms: new MSE(), sb: null, q: [] };
+    audio.src = a.url = URL.createObjectURL(a.ms);
+    a.pump = () => {
+      if (rt.a !== a || !a.sb || a.sb.updating || !a.q.length) return;
+      const parts = a.q.splice(0), all = new Uint8Array(parts.reduce((n, p) => n + p.byteLength, 0));
+      let o = 0; for (const p of parts) { all.set(new Uint8Array(p), o); o += p.byteLength; }
+      try { a.sb.appendBuffer(all); } catch { rtSoundStop(rt); }
+    };
+    a.ms.addEventListener('sourceopen', () => {
+      try { a.sb = a.ms.addSourceBuffer('audio/mp4; codecs="mp4a.40.2"'); } catch { return; }
+      a.sb.addEventListener('updateend', () => {
+        const b = audio.buffered;
+        if (b.length) {
+          const end = b.end(b.length - 1);
+          if (end - audio.currentTime > 1.5 || audio.currentTime < b.start(b.length - 1)) audio.currentTime = Math.max(b.start(b.length - 1), end - 0.3);
+          if (audio.currentTime - b.start(0) > 90) { try { a.sb.remove(b.start(0), audio.currentTime - 60); } catch {} }
+        }
+        soundSync(); a.pump();
+      });
+      a.pump();
+    }, { once: true });
+  }
+  a.q.push(data); a.pump();
+}
+function rtSoundStop(rt) {
+  const a = rt.a; if (!a) return;
+  rt.a = null; audio.pause(); audio.removeAttribute('src'); audio.load(); URL.revokeObjectURL(a.url);
+}
+function rtStop() {
+  const rt = st.rt; if (!rt) return;
+  st.rt = null; rtSoundStop(rt); clearInterval(rt.timer);
+  if (rt.ws) { rt.ws.onclose = null; rt.ws.close(); }
+  URL.revokeObjectURL(rt.url);
+  video.playbackRate = st.speed;
+}
+
+/* ===================== HLS (recordings, and live where the relay can't play) ===================== */
+function hlsLoad(url, onReady, opts = {}) {
+  if (window.Hls && Hls.isSupported()) {
+    const h = st.hls = new Hls({ maxBufferLength: 30, backBufferLength: 60, enableWorker: true, lowLatencyMode: false, ...opts });
+    let ready = false;  // (a media playlist's LEVEL_LOADED can come before MANIFEST_PARSED)
+    h.on(Hls.Events.LEVEL_LOADED, (_, d) => {
+      st.frags = d.details.fragments;
+      if (!ready) { ready = true; onReady && onReady(); }
+    });
+    h.on(Hls.Events.ERROR, (_, d) => {
+      if (!d.fatal) return;
+      if (d.type === Hls.ErrorTypes.MEDIA_ERROR) h.recoverMediaError();
+      else message('<b>Playback failed</b>' + (d.details || ''), false);
+    });
+    h.loadSource(url); h.attachMedia(video);
+  } else if (video.canPlayType('application/vnd.apple.mpegurl')) {
+    video.src = url;  // native HLS (older iPhones): wall clock from the playlist's start date
+    video.addEventListener('loadedmetadata', () => onReady && onReady(), { once: true });
+  } else {
+    message("<b>This browser can't play the HD video</b>It's H.265: use Safari, or Chrome / Edge on a device with H.265 hardware decoding.");
+  }
+}
+function hlsLive() {
+  stopAll(); st.mode = 'hlslive';
+  message('Loading live…', true);
+  hlsLoad(`/api/live.m3u8?stream=${STREAM}`, () => { message(''); video.play().catch(() => {}); }, { liveSyncDurationCount: 2 });
+  ui();
+}
+// wall-clock time <-> media time, from the fragments' PROGRAM-DATE-TIMEs
+function wallAt(ct) {
+  if (st.mode === 'live') return now() - Math.max(0, (video.buffered.length ? video.buffered.end(video.buffered.length - 1) : ct) - ct);
+  const f = st.frags.find(f => ct >= f.start - 0.05 && ct < f.start + f.duration + 0.05);
+  if (f && f.programDateTime) return f.programDateTime / 1000 + (ct - f.start);
+  if (!st.hls && video.getStartDate && !isNaN(video.getStartDate())) return video.getStartDate() / 1000 + ct;
+  return null;
+}
+function mediaAt(t) {
+  const f = st.frags.find(f => f.programDateTime && t < f.programDateTime / 1000 + f.duration) || st.frags[st.frags.length - 1];
+  return f ? f.start + Math.max(0, t - f.programDateTime / 1000) : 0;
+}
+// play recordings from wall-clock time t: a window [t-30 s, t+2 h] (it moves on near its end)
+const WIN = 2 * 3600;
+async function playAt(t) {
+  if (t > now() - 25) return goLive();
+  const sp = st.spans.find(s => t < s[1]);
+  if (!sp) return goLive();                         // nothing recorded after t: live
+  if (t < sp[0]) t = sp[0];                          // in a gap: the next recording
+  stopAll(); st.mode = 'vod';
+  const req = ++st.loading, from = t - 30, to = Math.min(now(), t + WIN);
+  st.winEnd = to;
+  message('Loading…', true);
+  hlsLoad(`/api/vod.m3u8?stream=${STREAM}&from=${from}&to=${to}`, () => {
+    if (req !== st.loading) return;
+    video.currentTime = mediaAt(t);
+    video.playbackRate = st.speed;
+    video.play().catch(() => {});
+    message('');
+  });
+  st.wall = t; ui();
+}
+function goLive() { (canHevcMse ? rtStart : hlsLive)(); st.wall = now(); }
+// jump to wall-clock t: within the loaded recording window just seek, else load a new window
+function seekWall(t) {
+  const f0 = st.frags[0], fl = st.frags[st.frags.length - 1];
+  if (st.mode === 'vod' && f0?.programDateTime && t >= f0.programDateTime / 1000 && t < fl.programDateTime / 1000 + fl.duration - 3
+      && t <= now() - 25 && st.spans.some(s => t >= s[0] && t < s[1])) {
+    video.currentTime = mediaAt(t); st.wall = t; return;
+  }
+  playAt(t);
+}
+
+/* ===================== timeline ===================== */
+const cv = $('cv'), bar = $('bar');
+async function loadSpans() {
+  const t0 = dayStart(st.day) - 3600, t1 = Math.min(dayStart(st.day) + 90000, now() + 60);
+  try { const r = await api('coverage', { from: t0, to: t1 }); if (r.ok) st.spans = (await r.json()).spans; } catch {}
+  // also what's after this day, so playback can run on
+  try { const r = await api('coverage', { from: t1, to: now() + 60 }); if (r.ok) st.spans = st.spans.concat((await r.json()).spans); } catch {}
+  draw();
+}
+function view() {
+  const d0 = dayStart(st.day), span = st.zoom * 3600;
+  if (st.zoom === 24) return [d0, d0 + 86400];
+  let a = st.center - span / 2;
+  a = Math.max(d0, Math.min(a, d0 + 86400 - span));
+  return [a, a + span];
+}
+function draw() {
+  const dpr = devicePixelRatio || 1, w = bar.clientWidth, h = bar.clientHeight;
+  cv.width = w * dpr; cv.height = h * dpr;
+  const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
+  const [a, b] = view(), x = t => (t - a) / (b - a) * w;
+  g.fillStyle = '#1f2731'; g.fillRect(0, 14, w, 24);
+  g.fillStyle = getComputedStyle(document.body).getPropertyValue('--rec');
+  for (const [s, e] of st.spans) if (e > a && s < b) g.fillRect(Math.max(0, x(s)), 14, Math.max(1.5, x(e) - x(s)), 24);
+  // future: hatched
+  const n = now();
+  if (n < b) { g.fillStyle = '#0c0f13'; g.fillRect(x(n), 14, w - x(n), 24); }
+  // ticks
+  const step = { 24: 3 * 3600, 6: 3600, 1: 600 }[st.zoom];
+  g.fillStyle = '#8b96a3'; g.font = '11px system-ui'; g.textAlign = 'center';
+  for (let t = Math.ceil(a / step) * step; t <= b; t += step) {
+    g.fillRect(x(t), 38, 1, 5);
+    g.fillText(fmtHM(t), Math.min(w - 16, Math.max(16, x(t))), 54);
+  }
+  // playhead
+  const p = st.wall;
+  if (p && p >= a && p <= b) {
+    g.fillStyle = st.mode === 'vod' ? '#fff' : '#ff4d5e';
+    g.fillRect(x(p) - 1, 8, 2, 36);
+    g.beginPath(); g.arc(x(p), 8, 4, 0, 7); g.fill();
+  }
+}
+function barTime(ev) {
+  const r = bar.getBoundingClientRect(), [a, b] = view();
+  return a + Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * (b - a);
+}
+let dragging = false;
+bar.addEventListener('pointerdown', e => { dragging = true; bar.setPointerCapture(e.pointerId); st.wall = barTime(e); draw(); });
+bar.addEventListener('pointermove', e => { if (dragging) { st.wall = barTime(e); draw(); updateClock(st.wall); } });
+bar.addEventListener('pointerup', e => { if (!dragging) return; dragging = false; const t = barTime(e); st.center = t; seekWall(t); });
+
+/* ===================== UI ===================== */
+function updateClock(t) { $('clock').textContent = t ? fmtTime(t) : '--:--:--'; }
+function ui() {
+  const live = st.mode === 'live' || st.mode === 'hlslive';
+  $('liveTag').hidden = !live;
+  $('liveBtn').classList.toggle('on', live);
+  $('liveBtn').textContent = live ? '● Live' : '● Go live';
+  for (const id of ['back10', 'fwd10']) $(id).disabled = st.mode === 'live';
+  for (const b of $('speeds').children) { b.disabled = live; b.classList.toggle('on', +b.dataset.s === st.speed); }
+  const today = dayKey(now());
+  $('dayLabel').textContent = st.day === today ? 'Today' : new Date(dayStart(st.day) * 1000 + 43200e3).toLocaleDateString('en-GB', { timeZone: TZ, weekday: 'short', day: 'numeric', month: 'short' });
+  $('nextDay').disabled = st.day >= today;
+  $('playBtn').textContent = video.paused ? '▶' : '⏸';
+  soundButton();
+}
+setInterval(() => {
+  if (dragging) return;
+  const w = wallAt(video.currentTime);
+  if (w) {
+    st.wall = w;
+    if (dayKey(w) !== st.day && st.mode === 'vod') { st.day = dayKey(w); loadSpans(); }
+    // keep the playhead in view
+    const [a, b] = view(); if (w < a || w > b) st.center = w;
+  }
+  updateClock(st.wall);
+  // a recording window nearly played out: the next window, or live
+  if (st.mode === 'vod' && st.frags.length) {
+    const last = st.frags[st.frags.length - 1];
+    if (video.currentTime > last.start + last.duration - 3) playAt(st.wall + 1);
+  }
+  draw();
+}, 500);
+setInterval(loadSpans, 30000);
+async function health() {
+  try {
+    const s = await (await api('status')).json();
+    const ok = s.behind_s != null && s.behind_s < 60;
+    $('health').className = 'dot ' + (ok ? 'ok' : 'bad');
+    $('health').title = ok ? 'Recording' : 'Not recording';
+    const days = s.oldest ? ((now() - s.oldest) / 86400).toFixed(1) : 0;
+    $('store').textContent = `${days} days kept · ${s.disk_free_gb} GB free`;
+  } catch {}
+}
+setInterval(health, 30000);
+
+$('liveBtn').onclick = () => { st.day = dayKey(now()); st.center = now(); goLive(); loadSpans(); };
+$('playBtn').onclick = () => { video.paused ? video.play().catch(() => {}) : video.pause(); };
+video.addEventListener('play', ui); video.addEventListener('pause', ui);
+video.addEventListener('play', soundSync); video.addEventListener('pause', soundSync);
+$('back10').onclick = () => st.wall && seekWall(st.wall - 10);
+$('fwd10').onclick = () => st.wall && seekWall(st.wall + 10);
+$('speeds').onclick = e => { const s = +e.target.dataset.s; if (!s) return; st.speed = s; video.playbackRate = s; ui(); };
+$('zooms').onclick = e => {
+  const z = +e.target.dataset.z; if (!z) return; st.zoom = z; st.center = st.wall || now();
+  for (const b of $('zooms').children) b.classList.toggle('on', +b.dataset.z === z); draw();
+};
+$('prevDay').onclick = () => { st.day = dayKey(dayStart(st.day) - 43200); st.center = dayStart(st.day) + 43200; loadSpans(); };
+$('nextDay').onclick = () => { st.day = dayKey(dayStart(st.day) + 129600); st.center = Math.min(now(), dayStart(st.day) + 43200); loadSpans(); };
+addEventListener('resize', draw);
+
+/* sound: HLS carries it in the video; the live relay in a separate audio element */
+function soundSync() {
+  video.muted = !st.soundOn || st.mode === 'live';
+  audio.muted = !st.soundOn;
+  if (st.rt?.a) { if (video.paused) audio.pause(); else if (st.soundOn && audio.paused) audio.play().catch(() => {}); }
+  soundButton();
+}
+function soundButton() { $('soundBtn').textContent = st.soundOn ? '🔊' : '🔇'; }
+$('soundBtn').onclick = () => { st.soundOn = !st.soundOn; try { localStorage.setItem('sound', st.soundOn ? 'on' : 'off'); } catch {} soundSync(); };
+
+/* download */
+$('dlBtn').onclick = () => $('dlg').showModal();
+$('dlClose').onclick = () => $('dlg').close();
+$('dlLens').onclick = e => {
+  const m = +e.target.dataset.m; if (!m) return;
+  const to = Math.min(st.wall || now(), now() - 15), from = to - m * 60;
+  location.href = `/api/export.mp4?stream=${STREAM}&from=${from}&to=${to}`;
+  $('dlg').close();
+};
+
+/* start (after sign-in) */
+window.startApp = () => {
+  $('app').hidden = false;
+  if (!(window.Hls && Hls.isSupported()) && !canHevcMse && !video.canPlayType('application/vnd.apple.mpegurl'))
+    message("<b>This browser can't play the HD video</b>It's H.265: use Safari, or Chrome / Edge on a device with H.265 hardware decoding.");
+  loadSpans(); health(); goLive();
+};
+</script>
+<script type="module">
+// Google sign-in (Firebase). auth_gate.js turns it into the session cookie nginx checks.
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, onAuthStateChanged, signOut }
+  from 'https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js';
+const app = initializeApp({
+  apiKey: 'AIzaSyAJr9yvtgtt7e21RSgLkXFfrsdDxZWO88c',
+  authDomain: 'localbc-41b52.firebaseapp.com',
+  projectId: 'localbc-41b52',
+  storageBucket: 'localbc-41b52.firebasestorage.app',
+  messagingSenderId: '626888021222',
+  appId: '1:626888021222:web:89911e33e91338b2bf9727',
+});
+const auth = getAuth(app), $ = id => document.getElementById(id);
+const login = $('login'), card = $('loginCard'), err = $('loginErr'), acct = $('acct');
+let started = false;
+async function openSession(user) {
+  try {
+    const me = await fetch('/auth/me', { cache: 'no-store' });
+    if (me.status !== 401) return true;
+    const r = await fetch('/auth/session', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ idToken: await user.getIdToken() }) });
+    if (r.ok) return true;
+    err.textContent = r.status === 403 ? "This Google account isn't allowed here." : 'Sign-in failed. Try again.';
+    await signOut(auth);
+    return false;
+  } catch { return true; }
+}
+onAuthStateChanged(auth, async user => {
+  if (user && !(await openSession(user))) user = null;
+  login.hidden = !!user; card.hidden = !!user;
+  if (!user) return;
+  acct.title = user.email || 'Account';
+  if (user.photoURL) { acct.style.backgroundImage = `url("${user.photoURL}")`; acct.textContent = ''; }
+  else acct.textContent = (user.displayName || user.email || '?')[0].toUpperCase();
+  if (!started) { started = true; window.startApp(); }
+}, () => { card.hidden = false; err.textContent = 'Could not check the sign-in. Reload to try again.'; });
+$('gSignIn').onclick = async () => {
+  err.textContent = ''; $('gSignIn').disabled = true;
+  const p = new GoogleAuthProvider();
+  try { await signInWithPopup(auth, p); }
+  catch (e) {
+    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') { try { await signInWithRedirect(auth, p); return; } catch (e2) { e = e2; } }
+    if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request')
+      err.textContent = e.code === 'auth/unauthorized-domain' ? "This address isn't allowed for Google sign-in yet." : 'Sign-in failed. Try again.';
+  }
+  $('gSignIn').disabled = false;
+};
+acct.onclick = () => { if (confirm(`Sign out${auth.currentUser?.email ? ' ' + auth.currentUser.email : ''}?`)) fetch('/auth/logout', { method: 'POST' }).catch(() => {}).finally(() => signOut(auth).then(() => location.reload())); };
+</script>
+</body>
+</html>

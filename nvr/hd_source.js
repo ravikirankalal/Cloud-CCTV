@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// One camera's HD stream from the TrueCloud cloud, as raw H.265 on stdout (hd_record.py runs it).
+// One camera's HD stream from the TrueCloud cloud, as MPEG-TS on stdout (recorder.py runs it).
 // Runs the TrueCloud portal's own p2p worker (truecloud/*.connector.js, the dvr163 "kp2p"
 // protocol): find the device via the vendor's servers, connect through their relay, log in
 // with the device key, open the stream. Exits (non-zero) when the link fails or goes quiet;
-// hd_record.py starts it again.
+// recorder.py starts it again.
 //
 //   node hd_source.js DEVICE.json [streamid=1]
 // DEVICE.json: {"dev": "productId:deviceId:deviceSecret", "user", "pwd", "ngw", "port", "https"}

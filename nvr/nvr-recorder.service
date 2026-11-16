@@ -1,0 +1,20 @@
+[Unit]
+Description=NVR: record the HD stream as indexed HLS segments (recorder.py)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nvr
+Environment=NVR_DATA=/home/ubuntu/nvr-data
+# the zero-delay live relay (nginx: /api/live-ws/cam1)
+Environment=HD_LIVE_SOCK=/home/ubuntu/nvr/run/hd-live-cam1.sock
+ExecStartPre=/bin/mkdir -p /home/ubuntu/nvr/run
+ExecStart=/usr/bin/python3 /home/ubuntu/nvr/recorder.py /home/ubuntu/nvr/state/hd-device.json cam1
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target
