@@ -50,11 +50,13 @@ def session(path, threads=1):
 def decode_frame(init, seg, ss=None):
     """One RGB frame (HxWx3) from the segment. The fMP4 media segment needs its init prepended; we feed
     init+seg to ffmpeg on stdin (no shell, so paths with spaces/quotes are safe) and get a PNG back, so
-    the dimensions come from the image itself — no separate ffprobe."""
+    the dimensions come from the image itself — no separate ffprobe. `ss` (seconds into the segment)
+    goes AFTER -i: stdin is a pipe and input-seek (-ss before -i) needs a seekable source, so it would
+    silently decode nothing; output-seek works on a pipe."""
     with open(init, "rb") as f1, open(seg, "rb") as f2:
         data = f1.read() + f2.read()
-    cmd = ["ffmpeg", "-v", "error"] + (["-ss", str(ss)] if ss else []) + \
-          ["-i", "pipe:0", "-frames:v", "1", "-f", "image2", "-c:v", "png", "pipe:1"]
+    cmd = ["ffmpeg", "-v", "error", "-i", "pipe:0"] + (["-ss", str(ss)] if ss else []) + \
+          ["-frames:v", "1", "-f", "image2", "-c:v", "png", "pipe:1"]
     out = subprocess.run(cmd, input=data, capture_output=True).stdout
     if not out:
         raise RuntimeError("frame decode failed (no image from ffmpeg)")
