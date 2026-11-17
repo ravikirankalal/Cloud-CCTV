@@ -47,20 +47,37 @@ def session(path, threads=1):
 
 
 # ---- frame decode: ONE shell-free ffmpeg call per frame, shared by detection and embedding ----
+_DIMS = {}                       # init path -> (w, h); the camera resolution is constant per run
+
+
+def _frame_dims(init):
+    """Frame size, probed once per init file and cached (every segment of a run shares one resolution)."""
+    if init not in _DIMS:
+        out = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0",
+                              "-show_entries", "stream=width,height", "-of", "csv=s=x:p=0", init],
+                             capture_output=True).stdout.decode().strip()
+        w, h = (int(x) for x in out.split("x"))
+        _DIMS[init] = (w, h)
+    return _DIMS[init]
+
+
 def decode_frame(init, seg, ss=None):
     """One RGB frame (HxWx3) from the segment. The fMP4 media segment needs its init prepended; we feed
-    init+seg to ffmpeg on stdin (no shell, so paths with spaces/quotes are safe) and get a PNG back, so
-    the dimensions come from the image itself — no separate ffprobe. `ss` (seconds into the segment)
-    goes AFTER -i: stdin is a pipe and input-seek (-ss before -i) needs a seekable source, so it would
+    init+seg to ffmpeg on stdin (no shell, so paths with spaces/quotes are safe) and read RAW rgb24
+    back — NOT PNG: encoding a ~3 MP lossless PNG per frame cost ~4x the decode itself (≈3.9s vs ≈1.0s).
+    Dimensions come from a cheap, cached ffprobe of the init file. `ss` (seconds into the segment) goes
+    AFTER -i: stdin is a pipe and input-seek (-ss before -i) needs a seekable source, so it would
     silently decode nothing; output-seek works on a pipe."""
+    w, h = _frame_dims(init)
     with open(init, "rb") as f1, open(seg, "rb") as f2:
         data = f1.read() + f2.read()
     cmd = ["ffmpeg", "-v", "error", "-i", "pipe:0"] + (["-ss", str(ss)] if ss else []) + \
-          ["-frames:v", "1", "-f", "image2", "-c:v", "png", "pipe:1"]
+          ["-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
     out = subprocess.run(cmd, input=data, capture_output=True).stdout
-    if not out:
-        raise RuntimeError("frame decode failed (no image from ffmpeg)")
-    return np.asarray(Image.open(io.BytesIO(out)).convert("RGB"))
+    need = w * h * 3
+    if len(out) < need:
+        raise RuntimeError(f"frame decode failed ({len(out)}/{need} bytes from ffmpeg)")
+    return np.frombuffer(out[:need], np.uint8).reshape(h, w, 3)
 
 
 def _letterbox(frame_rgb, size=YOLOX_SIZE):
