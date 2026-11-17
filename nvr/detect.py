@@ -160,16 +160,37 @@ def detect_frame(init, seg, ss=None):
     return detect_in(decode_frame(init, seg, ss))
 
 
+def detect_embed(frame):
+    """Detections for an already-decoded RGB frame, each with a 512-d 'embedding'."""
+    dets = detect_in(frame)
+    if dets:
+        for d, f in zip(dets, embed(frame, [d["box"] for d in dets])):
+            d["embedding"] = f.astype(float).tolist()
+    return dets
+
+
 def detect_embed_frame(init, seg, ss=None):
     """Detections for one frame, each with a 512-d 'embedding'. Empty list if no people.
     Decodes the frame ONCE and shares it between detection and embedding."""
-    frame = decode_frame(init, seg, ss)
-    dets = detect_in(frame)
-    if not dets:
-        return []
-    for d, f in zip(dets, embed(frame, [d["box"] for d in dets])):
-        d["embedding"] = f.astype(float).tolist()
-    return dets
+    return detect_embed(decode_frame(init, seg, ss))
+
+
+def crop_to_jpeg(frame_rgb, box, pad=0.12, max_side=320, quality=82):
+    """A JPEG of one person box cut from the already-decoded frame (no ffmpeg). Done at detection
+    time so the UI can serve it as a static file forever — even after the segment is deleted.
+    Returns bytes, or None if the box is empty."""
+    H, W = frame_rgb.shape[:2]
+    x1, y1, x2, y2 = box
+    pw, ph = (x2 - x1) * pad, (y2 - y1) * pad
+    x1, y1 = max(0, int(x1 - pw)), max(0, int(y1 - ph))
+    x2, y2 = min(W, int(x2 + pw)), min(H, int(y2 + ph))
+    if x2 <= x1 or y2 <= y1:
+        return None
+    im = Image.fromarray(frame_rgb[y1:y2, x1:x2])
+    im.thumbnail((max_side, max_side))
+    buf = io.BytesIO()
+    im.save(buf, "JPEG", quality=quality)
+    return buf.getvalue()
 
 
 # ---- CLI (testing) ----
