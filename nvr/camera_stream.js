@@ -36,6 +36,11 @@ const [pid, did, secret] = cfg.dev.split(":");
 const log = (...a) => process.stderr.write(a.join(" ") + "\n");
 console.log = console.error = console.warn = console.info = () => {};
 const quit = (why, code = 1) => { log("camera_stream:", why); process.exit(code); };
+// Cloud/device "not available right now" codes: -15 rate-limit after a drop (~50 s window),
+// -13 refused, -12 device seek timeout (camera offline/rebooting). We exit 2 on these so the
+// recorder backs off past the refusal window instead of hammering it; a clean drop stays exit 1.
+const REFUSAL = new Set([-15, -13, -12]);
+const REFUSED_EXIT = 2;
 
 const self = globalThis;
 self.self = self;
@@ -47,7 +52,11 @@ self.importScripts = (...urls) => urls.forEach(u =>
 const send = (message, data) => self.onmessage({ data: { message, data } });
 
 const key = "s";
-const RENEW_S = 240;  // ask for the stream again this often (see onopenstream)
+const RENEW_S = +(process.env.RENEW_S ?? 0);  // re-send open_stream this often; 0 = off (default).
+// Off on purpose: never disturb a working stream. The 4-min renewal does NOT prevent this camera's
+// stalls (it stalls its video + SD-card recording ~every 4-5 min regardless — a card/encoder issue,
+// not our link), and re-sending open_stream mid-stream can itself coincide with a teardown. So we hold
+// the session and only reconnect when it actually drops.
 let renew = null;
 // once a minute: frames and bytes received, and how far the camera's frame clock has fallen
 // behind ours since the start (the cloud relay delivers late when it can't keep up)
@@ -367,17 +376,17 @@ self.postMessage = ({ message, data }) => {
     feed(outs.video, TS.video(data.frametype === 1, data.frameData), data.frametype === 1);
     liveFrame(data.frametype === 1, data.frameData);
   } else if (message === "onconnect") {
-    if (data.code !== 0) quit(`connect failed (${data.code})`);
+    if (data.code !== 0) quit(`connect failed (${data.code})`, REFUSAL.has(data.code) ? REFUSED_EXIT : 1);
     send("login", { sessionKey: key, user: cfg.user, pwd: cfg.pwd, test: cfg.test || false });
   } else if (message === "onloginresult") {
     if (data.code !== 0) quit(`login failed (${data.code})`);
     send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM });
   } else if (message === "onopenstream") {
-    if (data.code !== 0) quit(`open stream failed (${data.code})`);
-    // the cloud ends a stream ~10 min after it's opened: ask for it again well before (an
-    // experiment: does that keep it going without a gap?)
-    if (!renew) { renew = setInterval(() => { log("camera_stream: renewing the stream"); send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM }); }, RENEW_S * 1000); }
-    else log(`camera_stream: stream renewed (code ${data.code})`);
+    if (data.code !== 0) quit(`open stream failed (${data.code})`, REFUSAL.has(data.code) ? REFUSED_EXIT : 1);
+    // the camera stalls its video ~every 4-5 min unless asked for the stream again; re-send
+    // open_stream every RENEW_S (seamless, same session) to keep it streaming without a gap.
+    if (!renew && RENEW_S > 0) { renew = setInterval(() => { log("camera_stream: renewing the stream"); send("open_stream", { sessionKey: key, channel: 0, streamid: STREAM }); }, RENEW_S * 1000); }
+    else if (renew) log(`camera_stream: stream renewed (code ${data.code})`);
   } else if (ctl.on(message, data)) {
     // the control socket's replies (SD-card search and replay, camera settings)
   } else if (message === "ondisconnect") {

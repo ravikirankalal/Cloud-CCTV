@@ -41,8 +41,11 @@ STREAM_ID = os.environ.get("HD_STREAM_ID", "2")
 MIN_FREE_GB = float(os.environ.get("MIN_FREE_GB", "25"))
 SOURCE = os.environ.get("HD_SOURCE", os.path.join(HERE, "camera_stream.js"))
 LIVE_SOCK = os.environ.get("HD_LIVE_SOCK", "")  # empty: no live relay
-BACKOFF = [2, 5, 10, 15, 30]  # seconds between attempts after quick failures (the cloud refuses
-                              # a new session for a while after one ends)
+BACKOFF = [5, 15, 30, 60]  # seconds between reconnect attempts after repeated quick failures; we
+                           # reconnect when the stream actually drops, never on purpose
+REFUSAL_WAIT = 55          # the cloud refuses new connects for ~50 s after a drop (source exits 2);
+                           # wait out that window once instead of hammering it with a reconnect storm
+REFUSED_EXIT = 2           # camera_stream.js exit code for a -15/-13/-12 cloud/device refusal
 
 stopping = False
 src = None
@@ -213,31 +216,44 @@ def retention(stop_evt):
     while not stop_evt.wait(300):
         if free_gb() >= MIN_FREE_GB:
             continue
+        # one transient error must NOT kill this thread for good (disk would then fill and recording
+        # would stop silently), so the whole pass is guarded and the connection always closed.
         conn = db()
-        target = MIN_FREE_GB + 5
-        while free_gb() < target:
-            # the oldest hour that has segments
-            row = conn.execute("SELECT stream, path FROM segments ORDER BY stream, start LIMIT 1").fetchone()
-            if not row:
-                break
-            hour_dir = os.path.dirname(row[1])  # <stream>/<day>/<HH>
-            # a path range (uses the path index; LIKE read the whole table)
-            conn.execute("DELETE FROM segments WHERE path >= ? AND path < ?", (hour_dir + "/", hour_dir + "0"))
-            conn.commit()
-            shutil.rmtree(os.path.join(DATA, hour_dir), ignore_errors=True)
-            day_dir = os.path.dirname(os.path.join(DATA, hour_dir))
-            if os.path.isdir(day_dir) and not os.listdir(day_dir):
-                os.rmdir(day_dir)
-            log(f"retention: deleted {hour_dir}")
-        # init files no segment refers to any more
-        used = {r[0] for r in conn.execute("SELECT DISTINCT init FROM segments")}
-        for s in {r[0] for r in conn.execute("SELECT DISTINCT stream FROM segments")}:
-            idir = os.path.join(DATA, s, "init")
-            for f in os.listdir(idir):
-                rel = os.path.join(s, "init", f)
-                if rel not in used and not f.startswith(f"init-{current_run}"):
-                    os.remove(os.path.join(idir, f))
-        conn.close()
+        try:
+            target = MIN_FREE_GB + 5
+            while free_gb() < target:
+                # the oldest hour that has segments
+                row = conn.execute("SELECT stream, path FROM segments ORDER BY stream, start LIMIT 1").fetchone()
+                if not row:
+                    break
+                hour_dir = os.path.dirname(row[1])  # <stream>/<day>/<HH>
+                # a path range (uses the path index; LIKE read the whole table)
+                conn.execute("DELETE FROM segments WHERE path >= ? AND path < ?", (hour_dir + "/", hour_dir + "0"))
+                conn.commit()
+                shutil.rmtree(os.path.join(DATA, hour_dir), ignore_errors=True)
+                if os.path.isdir(os.path.join(DATA, hour_dir)):
+                    # rmtree could not remove the files: stop now instead of looping and deleting
+                    # newer hours from the DB only (which would empty the index without freeing disk)
+                    log(f"retention: could not remove {hour_dir}; stopping this pass")
+                    break
+                day_dir = os.path.dirname(os.path.join(DATA, hour_dir))
+                if os.path.isdir(day_dir) and not os.listdir(day_dir):
+                    os.rmdir(day_dir)
+                log(f"retention: deleted {hour_dir}")
+            # init files no segment refers to any more
+            used = {r[0] for r in conn.execute("SELECT DISTINCT init FROM segments")}
+            for s in {r[0] for r in conn.execute("SELECT DISTINCT stream FROM segments")}:
+                idir = os.path.join(DATA, s, "init")
+                if not os.path.isdir(idir):
+                    continue
+                for f in os.listdir(idir):
+                    rel = os.path.join(s, "init", f)
+                    if rel not in used and not f.startswith(f"init-{current_run}."):
+                        os.remove(os.path.join(idir, f))
+        except Exception as e:
+            log(f"retention: error ({e})")
+        finally:
+            conn.close()
 
 
 current_run = 0
@@ -262,18 +278,19 @@ def run_once(device, stream):
         env["HD_LIVE_SOCK"] = LIVE_SOCK
     else:
         env.pop("HD_LIVE_SOCK", None)
-    src = subprocess.Popen(["node", SOURCE, device, STREAM_ID], stdout=subprocess.PIPE, env=env)
-    # ffmpeg only once the camera sends something (a failed connect otherwise leaves it erroring)
+    src = subprocess.Popen(["node", SOURCE, device, STREAM_ID], stdout=subprocess.PIPE, bufsize=0, env=env)
+    # ffmpeg only once the camera sends something (a failed connect otherwise leaves it erroring).
+    # Do NOT read from src.stdout here: any byte we consume never reaches ffmpeg, so it would miss the
+    # first keyframe's VPS/SPS/PPS and die with "incorrect codec parameters". (bufsize=0 keeps the pipe
+    # unbuffered too, so nothing is stolen into a Python buffer.) select = data waiting; poll() tells a
+    # closed pipe (failed connect) apart from real data.
     while not stopping and src.poll() is None:
         if select.select([src.stdout], [], [], 1)[0]:
-            if src.stdout.peek(1):
-                break
-            src.wait()  # readable because it closed: the source quit without sending anything
             break
     if stopping or src.poll() is not None:
         src.wait()
         log(f"run {run}: no stream (source {src.returncode})")
-        return 0
+        return 0, src.returncode == REFUSED_EXIT
     started = time.time()
 
     seg_pattern = os.path.join(sdir, "%Y-%m-%d", "%H", "seg-%s.m4s")
@@ -298,7 +315,7 @@ def run_once(device, stream):
     done.set()
     t.join(10)
     log(f"run {run} ended after {time.time() - started:.0f} s (source {src.returncode}, ffmpeg {rec.returncode})")
-    return time.time() - started
+    return time.time() - started, src.returncode == REFUSED_EXIT
 
 
 def stop(*_):
@@ -319,10 +336,20 @@ def main():
     threading.Thread(target=retention, args=(stop_evt,), daemon=True).start()
     fails = 0
     while not stopping:
-        lasted = run_once(device, stream)
-        fails = 0 if lasted > 120 else fails + 1  # a run that recorded a while resets the back-off
+        lasted, refused = run_once(device, stream)
+        if refused:
+            # the cloud is in its post-drop refusal window (-15/-13/-12): one quiet wait past it,
+            # not a burst of retries that keeps the refusal alive and stretches the gap
+            wait = REFUSAL_WAIT
+            fails = 0
+        elif lasted > 120:
+            wait = 2            # a run that recorded a while: the drop was real, reconnect promptly
+            fails = 0
+        else:
+            fails += 1          # repeated quick failures: 5 -> 15 -> 30 -> 60 s
+            wait = BACKOFF[min(fails, len(BACKOFF)) - 1]
         if not stopping:
-            time.sleep(BACKOFF[min(fails, len(BACKOFF)) - 1] if fails else BACKOFF[0])
+            time.sleep(wait)
     stop_evt.set()
 
 
