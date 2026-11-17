@@ -42,6 +42,7 @@ ddl("""CREATE TABLE detections (
   score       BINARY_FLOAT,
   embedding   VECTOR(512, FLOAT32),
   identity_id NUMBER,
+  cluster_id  NUMBER,
   confirmed   NUMBER(1) DEFAULT 0,
   created     TIMESTAMP DEFAULT SYSTIMESTAMP
 )""")
