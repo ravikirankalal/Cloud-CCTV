@@ -19,6 +19,9 @@ BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop bef
 IDLE = int(os.environ.get("DET_IDLE", "15"))             # sleep seconds when caught up
 RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnecting to Oracle after a DB error
 MATCH_DIST = float(os.environ.get("DET_MATCH", "0.28"))  # cosine distance < this => same known person
+CROP_DIR = os.path.join(DATA, "crops")                   # one static person-crop jpeg per detection
+
+os.makedirs(CROP_DIR, exist_ok=True)
 
 sys.path.insert(0, HERE)
 import adb                                                # shared Oracle connection
@@ -51,21 +54,38 @@ def set_state(cur, k, v):
                 "WHEN NOT MATCHED THEN INSERT (k, v) VALUES (s.k, s.v)", [k, v])
 
 
+def _save_crop(frame, box, det_id):
+    """Write the static person crop for a detection (atomic). Best-effort; never fatal."""
+    try:
+        jpg = detect.crop_to_jpeg(frame, box)
+        if jpg:
+            tmp = os.path.join(CROP_DIR, f"{det_id}.jpg.tmp")
+            with open(tmp, "wb") as f:
+                f.write(jpg)
+            os.replace(tmp, os.path.join(CROP_DIR, f"{det_id}.jpg"))
+    except Exception as e:
+        print(f"  crop {det_id} failed: {e}", flush=True)
+
+
 def process_segment(nvr, cur, seg_id):
-    """Detect+embed one segment's frame and insert its people. Returns the number of people stored.
-    DB errors propagate (to trigger a reconnect); decode errors are the caller's to swallow."""
+    """Detect+embed one segment's frame and insert its people, saving each one's crop jpeg while the
+    frame is in hand. Returns the number of people stored. DB errors propagate (to trigger a
+    reconnect); decode errors are the caller's to swallow."""
     row = nvr.execute("SELECT start, path, init FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
         return 0
     start, path, init = row
-    dets = detect.detect_embed_frame(os.path.join(DATA, init), os.path.join(DATA, path))
+    frame = detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path))
+    dets = detect.detect_embed(frame)
     for d in dets:
         emb = array.array("f", d["embedding"])
         ident = match_known(cur, emb)
+        idv = cur.var(oracledb.NUMBER)
         cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id)
-                       VALUES (:1, :2, :3, :4, :5, :6)""",
+                       VALUES (:1, :2, :3, :4, :5, :6) RETURNING id INTO :7""",
                     (float(start), seg_id, ",".join(str(int(v)) for v in d["box"]),
-                     float(d["score"]), emb, ident))
+                     float(d["score"]), emb, ident, idv))
+        _save_crop(frame, d["box"], int(idv.getvalue()[0]))
     return len(dets)
 
 
@@ -128,10 +148,35 @@ def backfill(a, b):
     print(f"backfill done: {total} detections from {len(ids)} frames in {time.time()-t0:.0f}s", flush=True)
 
 
+def backfill_crops():
+    """One-shot: make the static crop for any stored detection that doesn't have one yet and whose
+    segment is still on disk. Pure read of segments + Oracle; safe to re-run."""
+    orc = adb.connect(); cur = orc.cursor(); nvr = ro_nvr()
+    cur.execute("SELECT id, seg_id, box FROM detections ORDER BY id")
+    rows = cur.fetchall()
+    made = skip = have = 0
+    for det_id, seg_id, box in rows:
+        det_id = int(det_id)
+        if os.path.exists(os.path.join(CROP_DIR, f"{det_id}.jpg")):
+            have += 1; continue
+        r = nvr.execute("SELECT path, init FROM segments WHERE id = ?", (int(seg_id),)).fetchone()
+        if not r or not box:
+            skip += 1; continue
+        try:
+            frame = detect.decode_frame(os.path.join(DATA, r[1]), os.path.join(DATA, r[0]))
+            _save_crop(frame, [int(v) for v in box.split(",")], det_id); made += 1
+        except Exception as e:
+            print(f"  seg {seg_id} skip: {e}", flush=True); skip += 1
+    print(f"crop backfill: {made} made, {have} already had one, {skip} skipped (no segment)", flush=True)
+    orc.close()
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "run":
         run()
     elif len(sys.argv) >= 4 and sys.argv[1] == "backfill":
         backfill(int(sys.argv[2]), int(sys.argv[3]))
+    elif len(sys.argv) >= 2 and sys.argv[1] == "backfill-crops":
+        backfill_crops()
     else:
         sys.exit(__doc__)
