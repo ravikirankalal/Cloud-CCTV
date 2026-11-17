@@ -3,68 +3,143 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#0c0f13">
+<meta name="theme-color" content="#080b0f">
 <title>Guttedar Nilaya</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0c0f13;--panel:#151a21;--panel2:#1c232c;--line:#27303b;--text:#e8edf2;--muted:#8b96a3;
-  --rec:#3b82f6;--card:#f59f00;--off:#6b2630;--live:#ff4d5e;--ok:#37b24d;--warn:#f59f00;--radius:12px;color-scheme:dark}
+:root{
+  /* instrument palette: a calm near-black deck; saturated colour reserved for the data on the timeline */
+  --bg:#080b0f; --bg2:#0c1117;
+  --panel:#111720; --panel2:#171e28; --elev:#212b37;
+  --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
+  --text:#eef3f8; --muted:#97a3b1; --faint:#5f6b78;
+  --rec:#3f8cff; --card:#f5a524; --off:#6b2630;
+  --live:#ff3b4e; --ok:#2fd27a; --warn:#f5a524;
+  --glow:rgba(63,140,255,.5);
+  --radius:16px; --radius-sm:11px;
+  --ring:0 0 0 1px var(--line);
+  --lift:0 1px 0 rgba(255,255,255,.045) inset;
+  --shadow:0 18px 48px -28px rgba(0,0,0,.9);
+  color-scheme:dark;
+}
 *{box-sizing:border-box}
-html,body{margin:0;background:var(--bg);color:var(--text);font:15px/1.4 system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
-  -webkit-tap-highlight-color:transparent}
-button{font:inherit;color:inherit;background:var(--panel2);border:1px solid var(--line);border-radius:10px;
-  padding:8px 12px;cursor:pointer;touch-action:manipulation}
-button:active{transform:scale(.97)}
-button[disabled]{opacity:.4;cursor:default}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.5 "IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-tap-highlight-color:transparent}
+body{min-height:100dvh;
+  background:
+    radial-gradient(120% 56% at 50% -8%,rgba(63,140,255,.07),transparent 60%),
+    radial-gradient(140% 80% at 50% -4%,#141c27 0%,var(--bg) 54%);
+  background-attachment:fixed}
+.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;font-feature-settings:"tnum","zero"}
+button{font:inherit;font-weight:500;color:var(--text);background:var(--panel2);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:0 15px;min-height:44px;cursor:pointer;touch-action:manipulation;
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;box-shadow:var(--lift);
+  transition:background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease,transform .05s ease}
+button:hover{background:var(--elev);border-color:var(--line2)}
+button:active{transform:scale(.975)}
+button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--rec)}
+button[disabled]{opacity:.34;cursor:default;pointer-events:none;box-shadow:none}
 [hidden]{display:none!important}
-.app{max-width:1100px;margin:0 auto;padding:12px 16px calc(16px + env(safe-area-inset-bottom))}
-header{display:flex;align-items:center;gap:10px;margin-bottom:10px}
-header h1{font-size:18px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);flex:none}
-.dot.ok{background:var(--ok)}.dot.bad{background:var(--live)}
-.acct{width:34px;height:34px;padding:0;border-radius:50%;background:#2a3340 center/cover;font-weight:700}
+.app{max-width:1060px;margin:0 auto;padding:18px 16px calc(22px + env(safe-area-inset-bottom))}
+/* header */
+header{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:0 2px}
+header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dot{position:relative;width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none;box-shadow:0 0 0 4px rgba(255,255,255,.025)}
+.dot.ok{background:var(--ok);box-shadow:0 0 0 4px rgba(47,210,122,.14),0 0 12px rgba(47,210,122,.5)}
+.dot.bad{background:var(--live);box-shadow:0 0 0 4px rgba(255,59,78,.16),0 0 12px rgba(255,59,78,.55)}
+.acct{width:38px;height:38px;min-height:38px;padding:0;border-radius:50%;background:var(--panel2) center/cover;
+  font-weight:700;font-size:14px;color:var(--muted);border-color:var(--line);box-shadow:var(--lift)}
+.acct:hover{color:var(--text)}
 /* player */
-.stage{position:relative;background:#000;border-radius:var(--radius);overflow:hidden;aspect-ratio:16/9}
+.stage{position:relative;background:#000;border-radius:var(--radius);overflow:hidden;aspect-ratio:16/9;
+  box-shadow:var(--ring),0 1px 0 rgba(255,255,255,.05),0 28px 60px -30px rgba(0,0,0,.95),0 0 60px -30px var(--glow)}
+.stage::after{content:"";position:absolute;inset:0;border-radius:var(--radius);pointer-events:none;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.06),inset 0 0 70px rgba(0,0,0,.45)}
 .stage video{width:100%;height:100%;display:block;object-fit:contain;background:#000}
-.badge{position:absolute;top:10px;left:10px;display:flex;gap:6px;align-items:center;pointer-events:none}
-.pill{background:rgba(0,0,0,.6);backdrop-filter:blur(6px);padding:4px 9px;border-radius:999px;font-size:13px;
-  font-variant-numeric:tabular-nums;font-weight:600}
-.pill.live{background:var(--live)}
-.msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:20px;color:var(--muted);
-  background:rgba(0,0,0,.55)}
-.msg b{display:block;color:var(--text);margin-bottom:4px}
-.spin{width:28px;height:28px;border:3px solid #fff3;border-top-color:#fff;border-radius:50%;animation:s 1s linear infinite;margin:0 auto 10px}
+.badge{position:absolute;top:12px;left:12px;display:flex;gap:7px;align-items:center;pointer-events:none;z-index:2}
+.pill{background:rgba(10,13,18,.66);backdrop-filter:blur(10px) saturate(1.3);-webkit-backdrop-filter:blur(10px) saturate(1.3);
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);
+  padding:6px 11px;border-radius:999px;font-size:12.5px;font-weight:600;line-height:1;
+  font-variant-numeric:tabular-nums;letter-spacing:.2px}
+#clock{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;letter-spacing:.4px}
+.pill.live{background:var(--live);color:#fff;display:inline-flex;align-items:center;gap:6px;letter-spacing:.8px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),0 2px 12px -2px rgba(255,59,78,.6)}
+.pill.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 6px #fff;animation:pulse 1.6s ease-in-out infinite}
+.pill.card{background:var(--card);color:#2a1a00;box-shadow:inset 0 0 0 1px rgba(0,0,0,.18)}
+.msg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:22px;color:var(--muted);z-index:3;
+  background:rgba(6,9,12,.66);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
+.msg b{display:block;color:var(--text);font-size:15px;font-weight:600;margin-bottom:6px;letter-spacing:-.01em}
+.spin{width:30px;height:30px;border:2.5px solid rgba(255,255,255,.16);border-top-color:#fff;border-radius:50%;animation:s 1s linear infinite;margin:0 auto 14px}
 @keyframes s{to{transform:rotate(1turn)}}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.35;transform:scale(.78)}}
 /* controls */
-.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}
-.controls .grow{flex:1}
-.golive{background:var(--live);border-color:var(--live);font-weight:700}
-.golive.on{background:transparent;color:var(--live)}
-.seg{display:inline-flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-.seg button{border:0;border-radius:0;background:var(--panel2);padding:8px 10px}
-.seg button.on{background:#2f3b4a;font-weight:700}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0}
+.cluster{display:inline-flex;align-items:center;gap:8px}
+.controls .spacer{flex:1 1 8px}
+.icon{width:44px;padding:0;font-size:17px}
+.golive{background:var(--live);border-color:transparent;color:#fff;font-weight:700;letter-spacing:.2px;
+  box-shadow:inset 0 0 0 1px rgba(255,255,255,.14),0 4px 18px -6px rgba(255,59,78,.7)}
+.golive:hover{background:#ff5366;border-color:transparent}
+.golive.on{background:var(--panel2);color:var(--muted);border:1px solid var(--line);box-shadow:var(--lift)}
+.golive.on:hover{background:var(--elev);color:var(--text);border-color:var(--line2)}
+.seg{display:inline-flex;align-items:stretch;border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;background:var(--panel2);box-shadow:var(--lift)}
+.seg button{border:0;border-radius:0;background:transparent;min-height:44px;padding:0 14px;font-weight:600;color:var(--muted);box-shadow:none}
+.seg button+button{border-left:1px solid var(--line)}
+.seg button:hover{background:var(--elev);color:var(--text)}
+.seg button.on,.seg button.on:hover{background:var(--rec);color:#05101f;box-shadow:inset 0 1px 0 rgba(255,255,255,.3),inset 0 -2px 6px rgba(0,0,0,.2)}
+.seg button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--rec)}
 /* timeline */
-.tl{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:10px 12px 12px}
-.tlhead{display:flex;align-items:center;gap:8px;margin-bottom:8px}
-.tlhead .day{flex:1;text-align:center;font-weight:600}
-.bar{position:relative;height:56px;touch-action:none;cursor:pointer;user-select:none}
-.bar canvas{width:100%;height:100%;display:block}
-.key{display:inline-block;width:10px;height:10px;border-radius:2px;margin:0 4px 0 6px;vertical-align:-1px}
-.dbg{margin-top:10px;background:var(--panel);border:1px dashed var(--line);border-radius:var(--radius);padding:10px 12px;font-size:13px;color:var(--muted)}
-.dbg b{color:var(--text)}.dbg button{float:right;padding:2px 8px;font-size:12px}
-.dbg ol{margin:6px 0 0;padding-left:18px;font-variant-numeric:tabular-nums}
-.pill.card{background:var(--card);color:#1a1300}
-.hint{color:var(--muted);font-size:12px;margin-top:6px;display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap}
+.tl{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);
+  padding:14px 16px 16px;box-shadow:var(--lift),var(--shadow)}
+.tlhead{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:13px}
+.tlhead .day{flex:1;text-align:center;font-weight:600;font-size:13.5px;min-width:80px;letter-spacing:.2px;font-variant-numeric:tabular-nums}
+.tlhead .icon{width:44px;font-size:20px;line-height:1}
+.bar{position:relative;height:56px;touch-action:none;cursor:pointer;user-select:none;
+  background:linear-gradient(180deg,#070a0e,#05080b);border-radius:10px}
+.bar canvas{width:100%;height:100%;display:block;border-radius:10px}
+.bar::after{content:"";position:absolute;inset:0;border-radius:10px;pointer-events:none;
+  box-shadow:inset 0 0 0 1px var(--line),inset 0 1px 0 rgba(255,255,255,.05),inset 0 2px 6px rgba(0,0,0,.6)}
+.howto{margin:11px 2px 0;font-size:12px;color:var(--faint);letter-spacing:.1px}
+.hint{margin-top:11px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap;font-size:12.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center}
+.key{width:10px;height:10px;border-radius:3px;margin-right:8px;display:inline-block;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.14)}
+#store{font-size:12px;color:var(--faint)}
+/* debug */
+.dbg{margin-top:14px;background:var(--panel);border:1px dashed var(--line2);border-radius:var(--radius);padding:12px 15px;font-size:13px;color:var(--muted)}
+.dbg b{color:var(--text)}
+.dbg>button{float:right;padding:0 11px;min-height:32px;font-size:12px}
+.dbg ol{margin:8px 0 0;padding-left:20px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;font-variant-numeric:tabular-nums;line-height:1.65}
 /* login */
-.login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:var(--bg);padding:24px}
-.login-card{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%;max-width:340px;text-align:center}
-.login-card h1{margin:6px 0 0;font-size:22px}
-.login-card p{margin:0 0 14px;color:var(--muted)}
-.gbtn{display:flex;align-items:center;gap:10px;justify-content:center;width:100%;background:#fff;color:#1f1f1f;
-  border:0;padding:12px 16px;font-weight:600}
+.login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;
+  background:
+    radial-gradient(120% 56% at 50% -2%,rgba(63,140,255,.1),transparent 60%),
+    radial-gradient(130% 85% at 50% 0%,#141c27,var(--bg));padding:24px}
+.login-card{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:340px;text-align:center}
+.login-card h1{margin:10px 0 0;font-size:23px;font-weight:600;letter-spacing:-.01em}
+.login-card p{margin:0 0 16px;color:var(--muted)}
+.gbtn{display:flex;align-items:center;gap:10px;justify-content:center;width:100%;min-height:48px;background:#fff;color:#1f1f1f;border:0;font-weight:600;box-shadow:0 8px 28px -12px rgba(0,0,0,.8)}
+.gbtn:hover{background:#f1f1f1}
 .login-err{min-height:18px;color:var(--live);font-size:13px}
-dialog{background:var(--panel);color:var(--text);border:1px solid var(--line);border-radius:var(--radius);max-width:360px;width:calc(100% - 32px)}
-dialog::backdrop{background:rgba(0,0,0,.6)}
-dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
+/* dialog */
+dialog{background:var(--panel);color:var(--text);border:1px solid var(--line2);border-radius:var(--radius);max-width:360px;width:calc(100% - 32px);padding:20px;
+  box-shadow:0 30px 70px -30px rgba(0,0,0,.95)}
+dialog::backdrop{background:rgba(4,6,9,.66);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px)}
+dialog>b{font-size:16px;letter-spacing:-.01em}
+dialog .desc{color:var(--muted);font-size:13px;margin-top:6px;line-height:1.5}
+dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 0}
+dialog .lens button{flex:1 1 64px}
+dialog .close button{width:100%}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
+@media (max-width:520px){
+  #zooms{flex:1 1 100%;margin-top:9px}
+  #zooms button{flex:1}
+}
 </style>
 </head>
 <body>
@@ -83,25 +158,34 @@ dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
   </div>
 
   <div class="controls">
-    <button id="playBtn" aria-label="Play / pause">⏸</button>
-    <button id="back10" aria-label="Back 10 seconds">−10s</button>
-    <button id="fwd10" aria-label="Forward 10 seconds">+10s</button>
-    <span class="seg" id="speeds"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="4">4×</button><button data-s="8">8×</button></span>
-    <button id="soundBtn" aria-label="Sound">🔇</button>
-    <span class="grow"></span>
+    <div class="cluster">
+      <button id="back10" aria-label="Back 10 seconds">−10s</button>
+      <button class="icon" id="playBtn" aria-label="Play or pause">⏸</button>
+      <button id="fwd10" aria-label="Forward 10 seconds">+10s</button>
+    </div>
+    <span class="seg" id="speeds" role="group" aria-label="Playback speed"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="4">4×</button><button data-s="8">8×</button></span>
+    <button class="icon" id="soundBtn" aria-label="Sound on or off">🔇</button>
+    <span class="spacer"></span>
     <button id="dlBtn">Download</button>
     <button class="golive" id="liveBtn">● Live</button>
   </div>
 
   <div class="tl">
     <div class="tlhead">
-      <button id="prevDay" aria-label="Previous day">‹</button>
+      <button class="icon" id="prevDay" aria-label="Previous day">‹</button>
       <div class="day" id="dayLabel">Today</div>
-      <button id="nextDay" aria-label="Next day">›</button>
-      <span class="seg" id="zooms"><button data-z="24">24h</button><button data-z="6">6h</button><button data-z="1" class="on">1h</button></span>
+      <button class="icon" id="nextDay" aria-label="Next day">›</button>
+      <span class="seg" id="zooms" role="group" aria-label="Timeline zoom"><button data-z="24">24h</button><button data-z="6">6h</button><button data-z="1" class="on">1h</button><button data-z="0.25">15m</button><button data-z="0.0833">5m</button></span>
     </div>
-    <div class="bar" id="bar"><canvas id="cv"></canvas></div>
-    <div class="hint"><span>Tap or drag the bar to jump · <i class="key" style="background:var(--rec)"></i>recorded <i class="key" style="background:var(--card)"></i>from SD card <i class="key" style="background:var(--off)"></i>camera off</span><span id="store"></span></div>
+    <div class="bar" id="bar" role="group" aria-label="Recording timeline. Drag the handle to seek; drag or scroll to pan."><canvas id="cv" aria-label="Recorded coverage for the selected day"></canvas></div>
+    <p class="howto">Drag the handle to scrub, or drag the bar to move through the day.</p>
+    <div class="hint">
+      <div class="legend">
+        <span><i class="key" style="background:var(--rec)"></i>Recorded</span>
+        <span><i class="key" style="background:var(--card)"></i>From SD card</span>
+      </div>
+      <span id="store" class="mono"></span>
+    </div>
   </div>
 
   <div class="dbg" id="dbg" hidden><button id="dbgOff">Turn off</button><b>Debug</b> · what's playing, and each switch (newest first)<ol id="dbgLog"></ol></div>
@@ -109,14 +193,14 @@ dialog .row{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0}
 
 <dialog id="dlg">
   <b>Download a clip</b>
-  <div style="color:var(--muted);font-size:13px;margin-top:4px">Ending at the time shown in the player</div>
-  <div class="row" id="dlLens"><button data-m="1">1 min</button><button data-m="5">5 min</button><button data-m="15">15 min</button><button data-m="30">30 min</button></div>
-  <div class="row"><button id="dlClose">Cancel</button></div>
+  <div class="desc">Saves the footage ending at the time shown in the player.</div>
+  <div class="row lens" id="dlLens"><button data-m="1">1 min</button><button data-m="5">5 min</button><button data-m="15">15 min</button><button data-m="30">30 min</button></div>
+  <div class="row close"><button id="dlClose">Cancel</button></div>
 </dialog>
 
 <div class="login" id="login">
   <div class="login-card" id="loginCard" hidden>
-    <svg width="44" height="44" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#ff4d5e"/><circle cx="12" cy="12" r="3.2" fill="#fff"/></svg>
+    <svg width="48" height="48" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#ff445a"/><circle cx="12" cy="12" r="3.2" fill="#fff"/></svg>
     <h1>Guttedar Nilaya</h1>
     <p>Sign in to see the camera.</p>
     <button class="gbtn" id="gSignIn" type="button"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.7a14.5 14.5 0 010-9.4l-7.9-6.1a24 24 0 000 21.6l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Sign in with Google</button>
@@ -335,11 +419,16 @@ function seekWall(t) {
 
 /* ===================== timeline ===================== */
 const cv = $('cv'), bar = $('bar');
+let spanReq = 0;
 async function loadSpans() {
+  const req = ++spanReq;                                         // newest call wins; drop stale overlaps
   const t0 = dayStart(st.day) - 3600, t1 = Math.min(dayStart(st.day) + 90000, now() + 60);
-  try { const r = await api('coverage', { from: t0, to: t1 }); if (r.ok) { const j = await r.json(); st.spans = j.spans; st.card = j.card || []; st.offline = j.offline || []; } } catch {}
+  let spans = [], card = [], offline = [];
+  try { const r = await api('coverage', { from: t0, to: t1 }); if (r.ok) { const j = await r.json(); spans = j.spans || []; card = j.card || []; offline = j.offline || []; } } catch {}
   // also what's after this day, so playback can run on
-  try { const r = await api('coverage', { from: t1, to: now() + 60 }); if (r.ok) st.spans = st.spans.concat((await r.json()).spans); } catch {}
+  try { const r = await api('coverage', { from: t1, to: now() + 60 }); if (r.ok) spans = spans.concat((await r.json()).spans || []); } catch {}
+  if (req !== spanReq) return;                                   // a newer load superseded this one
+  st.spans = spans; st.card = card; st.offline = offline;
   draw();
 }
 function view() {
@@ -354,40 +443,98 @@ function draw() {
   cv.width = w * dpr; cv.height = h * dpr;
   const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
   const [a, b] = view(), x = t => (t - a) / (b - a) * w;
-  g.fillStyle = '#1f2731'; g.fillRect(0, 14, w, 24);
+  g.fillStyle = '#141b24'; g.fillRect(0, 14, w, 24);
   const css = getComputedStyle(document.body), paint = (list, color, y = 14, hgt = 24) => {
     g.fillStyle = css.getPropertyValue(color);
-    for (const [s, e] of list || []) if (e > a && s < b) g.fillRect(Math.max(0, x(s)), y, Math.max(1.5, x(e) - x(s)), hgt);
+    // coalesce into pixel runs: many sub-pixel segments would otherwise each draw at a 1px
+    // minimum and smear into an overlapping barcode. Merge touching/adjacent pixels, then draw.
+    const runs = [];
+    for (const [s, e] of [...(list || [])].sort((p, q) => p[0] - q[0])) {
+      if (e <= a || s >= b) continue;
+      const x0 = Math.max(0, x(s)), x1 = Math.min(w, x(e));
+      if (runs.length && x0 <= runs[runs.length - 1][1] + 0.6) runs[runs.length - 1][1] = Math.max(runs[runs.length - 1][1], x1);
+      else runs.push([x0, x1]);
+    }
+    for (const [x0, x1] of runs) g.fillRect(x0, y, Math.max(1, x1 - x0), hgt);
   };
-  paint(st.offline, '--off');         // gaps the camera itself didn't record
-  paint(st.spans, '--rec');           // recorded
-  paint(st.card, '--card');           // of which: filled from the camera's SD card
+  // camera-off gaps are left as the empty bar background (no band)
+  paint([...(st.spans || []), ...(st.card || [])], '--rec');       // one continuous recorded base: live + card-filled
+  paint(st.card, '--card');                                        // highlight, on top, the parts filled from the SD card
   // future: hatched
   const n = now();
-  if (n < b) { g.fillStyle = '#0c0f13'; g.fillRect(x(n), 14, w - x(n), 24); }
+  if (n < b) { g.fillStyle = '#0a0e13'; g.fillRect(x(n), 14, w - x(n), 24); }
   // ticks
-  const step = { 24: 3 * 3600, 6: 3600, 1: 600 }[st.zoom];
-  g.fillStyle = '#8b96a3'; g.font = '11px system-ui'; g.textAlign = 'center';
+  const step = { 24: 3 * 3600, 6: 3600, 1: 600, 0.25: 120, 0.0833: 60 }[st.zoom];
+  g.fillStyle = '#7e8b99'; g.font = '11px "IBM Plex Mono", ui-monospace, monospace'; g.textAlign = 'center';
+  let lastLabel = -1e9;
   for (let t = Math.ceil(a / step) * step; t <= b; t += step) {
-    g.fillRect(x(t), 38, 1, 5);
-    g.fillText(fmtHM(t), Math.min(w - 16, Math.max(16, x(t))), 54);
+    const xt = x(t);
+    if (xt < -1 || xt > w + 1) continue;
+    g.fillRect(xt, 38, 1, 5);                                  // tick mark at the true position
+    if (xt >= 20 && xt <= w - 20 && xt - lastLabel >= 46) {    // label only if it fits and won't overlap
+      g.fillText(fmtHM(t), xt, 54); lastLabel = xt;
+    }
   }
   // playhead
   const p = st.wall;
   if (p && p >= a && p <= b) {
-    g.fillStyle = st.mode === 'vod' ? '#fff' : '#ff4d5e';
+    g.fillStyle = st.mode === 'vod' ? '#ffffff' : '#ff3b4e';
     g.fillRect(x(p) - 1, 8, 2, 36);
-    g.beginPath(); g.arc(x(p), 8, 4, 0, 7); g.fill();
+    g.beginPath(); g.arc(x(p), 8, 6, 0, 7); g.fill();
+    g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1.5; g.stroke();
   }
 }
 function barTime(ev) {
   const r = bar.getBoundingClientRect(), [a, b] = view();
   return a + Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width)) * (b - a);
 }
-let dragging = false;
-bar.addEventListener('pointerdown', e => { dragging = true; bar.setPointerCapture(e.pointerId); st.wall = barTime(e); draw(); });
-bar.addEventListener('pointermove', e => { if (dragging) { st.wall = barTime(e); draw(); updateClock(st.wall); } });
-bar.addEventListener('pointerup', e => { if (!dragging) return; dragging = false; const t = barTime(e); st.center = t; seekWall(t); });
+// Consistent at every zoom level:
+//  - the playhead is a draggable handle: grab it and drag to seek. A tap elsewhere never moves it.
+//  - drag anywhere else (or scroll/wheel) pans the view window; it does not touch the playhead.
+// (24h shows the whole day, so there is nothing to pan there.)
+let mode = null, startX = 0, startCenter = 0, pannedAt = 0;
+const PAN_TH = 10;    // px of movement before an off-handle drag becomes a pan
+const GRAB_PX = 22;   // how close to the playhead counts as grabbing it
+function clampCenter(c) {
+  if (st.zoom === 24) return st.center;        // whole day shown: nothing to pan
+  const span = st.zoom * 3600, d0 = dayStart(st.day);
+  return Math.max(d0 + span / 2, Math.min(c, d0 + 86400 - span / 2));
+}
+function playheadX() {                          // screen x of the playhead within the bar, or null
+  const [a, b] = view(), p = st.wall;
+  return (p != null && p >= a && p <= b) ? (p - a) / (b - a) * bar.clientWidth : null;
+}
+bar.addEventListener('pointerdown', e => {
+  bar.setPointerCapture(e.pointerId);
+  startX = e.clientX; startCenter = st.center;
+  const px = playheadX(), rel = e.clientX - bar.getBoundingClientRect().left;
+  mode = (px != null && Math.abs(rel - px) <= GRAB_PX) ? 'scrub' : 'pending';
+});
+bar.addEventListener('pointermove', e => {
+  if (!mode) return;
+  const dx = e.clientX - startX;
+  if (mode === 'pending' && Math.abs(dx) > PAN_TH) mode = st.zoom === 24 ? null : 'pan';
+  if (mode === 'scrub') { st.wall = barTime(e); draw(); updateClock(st.wall); }
+  else if (mode === 'pan') {
+    st.center = clampCenter(startCenter - dx / bar.clientWidth * (st.zoom * 3600));
+    pannedAt = Date.now(); draw();
+  }
+});
+bar.addEventListener('pointerup', e => {
+  const m = mode; mode = null;
+  const t = barTime(e);
+  // scrub: dragged the handle -> seek. Otherwise a stationary tap moves the playhead ONLY when it
+  // isn't currently on screen (after zoom/pan/day-change there's no handle to grab, so a tap is the
+  // only way to reach the visible region); when the handle IS visible, a tap elsewhere never moves it.
+  if (m === 'scrub' || (m === 'pending' && playheadX() == null)) { st.center = t; seekWall(t); }
+});
+bar.addEventListener('wheel', e => {
+  if (st.zoom === 24) return;                  // whole day already shown
+  e.preventDefault();
+  const d = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+  st.center = clampCenter(st.center + d / bar.clientWidth * (st.zoom * 3600));
+  pannedAt = Date.now(); draw();
+}, { passive: false });
 
 /* ===================== UI ===================== */
 function updateClock(t) { $('clock').textContent = t ? fmtTime(t) : '--:--:--'; }
@@ -405,13 +552,13 @@ function ui() {
   soundButton();
 }
 setInterval(() => {
-  if (dragging) return;
+  if (mode) return;   // don't fight the user while they're scrubbing or panning the timeline
   const w = wallAt(video.currentTime);
   if (w) {
     st.wall = w;
     if (dayKey(w) !== st.day && st.mode === 'vod') { st.day = dayKey(w); loadSpans(); }
     // keep the playhead in view
-    const [a, b] = view(); if (w < a || w > b) st.center = w;
+    const [a, b] = view(); if ((w < a || w > b) && Date.now() - pannedAt > 5000) st.center = w;
   }
   updateClock(st.wall);
   // a recording window nearly played out: the next window, or live
@@ -421,7 +568,11 @@ setInterval(() => {
   }
   draw();
 }, 500);
-setInterval(loadSpans, 30000);
+// refresh the recorded-coverage bar often while live (so the blue bar keeps up with the moving
+// playhead instead of jumping every 30 s), less often when reviewing recordings
+(function spanRefresh() {
+  setTimeout(() => { loadSpans(); spanRefresh(); }, st.mode === 'live' ? 5000 : 30000);
+})();
 async function health() {
   try {
     const s = await (await api('status')).json();
