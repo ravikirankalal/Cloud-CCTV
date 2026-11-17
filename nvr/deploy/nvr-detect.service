@@ -1,0 +1,24 @@
+[Unit]
+Description=NVR person detection (decoupled post-hoc consumer)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nvr
+Environment=NVR_DATA=/home/ubuntu/nvr-data
+Environment=NVR_DET_CONF=0.25
+Environment=DET_STRIDE=2
+ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_service.py run
+Restart=always
+RestartSec=10
+# resource guardrails: detection can NEVER starve the recorder on this 1GB box.
+Nice=15
+CPUWeight=20
+IOWeight=20
+MemoryHigh=380M
+MemoryMax=460M
+
+[Install]
+WantedBy=multi-user.target
