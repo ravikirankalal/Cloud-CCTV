@@ -4,15 +4,12 @@
 # downloaded wallet. Credentials come from files in the wallet dir (chmod 600), never hard-coded.
 #
 # This DB is the detection store ONLY — fully separate from the recorder's SQLite (decoupling rule).
-import os, array, oracledb
+import os, sys, array, oracledb
 
-WDIR = os.environ.get("ADB_WALLET", "/home/ubuntu/nvr/adb-wallet")
-DSN = os.environ.get("ADB_DSN", "nvrdetect_tp")
-admin_pw = open(os.path.join(WDIR, "admin.pw")).read().strip()
-wallet_pw = open(os.path.join(WDIR, "wallet.pw")).read().strip()
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import adb                                    # shared Oracle connection (creds from wallet files)
 
-conn = oracledb.connect(user="ADMIN", password=admin_pw, dsn=DSN,
-                        config_dir=WDIR, wallet_location=WDIR, wallet_password=wallet_pw)
+conn = adb.connect()
 print("connected; server version:", conn.version)
 cur = conn.cursor()
 

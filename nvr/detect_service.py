@@ -6,30 +6,24 @@
 # code, opens no recorder sockets, never touches the live path. It can lag, stop, or restart with zero
 # effect on recording. Meant to run under systemd with MemoryMax + Nice on this small box.
 #
-#   python detect_service.py run                      # live poller: process new segments forever
+#   python detect_service.py run                          # live poller: process new segments forever
 #   python detect_service.py backfill <from_id> <to_id>   # process an explicit id range (test/catch-up)
 import os, sys, time, sqlite3, array, importlib.util
 import oracledb
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("NVR_DATA", "/home/ubuntu/nvr-data")
-WDIR = os.environ.get("ADB_WALLET", "/home/ubuntu/nvr/adb-wallet")
-DSN = os.environ.get("ADB_DSN", "nvrdetect_tp")
 STREAM = os.environ.get("NVR_STREAM", "cam1")
-STRIDE = int(os.environ.get("DET_STRIDE", "2"))        # sample every Nth segment (1 frame each)
-BATCH = int(os.environ.get("DET_BATCH", "25"))         # segments per loop before committing/sleeping
-IDLE = int(os.environ.get("DET_IDLE", "15"))           # sleep seconds when caught up
+STRIDE = int(os.environ.get("DET_STRIDE", "2"))          # sample every Nth segment (1 frame each)
+BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop before committing/sleeping
+IDLE = int(os.environ.get("DET_IDLE", "15"))             # sleep seconds when caught up
+RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnecting to Oracle after a DB error
 MATCH_DIST = float(os.environ.get("DET_MATCH", "0.28"))  # cosine distance < this => same known person
 
-spec = importlib.util.spec_from_file_location("detect", os.path.join(HERE, "detect.py"))
-detect = importlib.util.module_from_spec(spec); spec.loader.exec_module(detect)
-
-
-def connect():
-    pw = open(os.path.join(WDIR, "admin.pw")).read().strip()
-    wpw = open(os.path.join(WDIR, "wallet.pw")).read().strip()
-    return oracledb.connect(user="ADMIN", password=pw, dsn=DSN,
-                            config_dir=WDIR, wallet_location=WDIR, wallet_password=wpw)
+sys.path.insert(0, HERE)
+import adb                                                # shared Oracle connection
+_spec = importlib.util.spec_from_file_location("detect", os.path.join(HERE, "detect.py"))
+detect = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(detect)
 
 
 def ro_nvr():
@@ -58,6 +52,8 @@ def set_state(cur, k, v):
 
 
 def process_segment(nvr, cur, seg_id):
+    """Detect+embed one segment's frame and insert its people. Returns the number of people stored.
+    DB errors propagate (to trigger a reconnect); decode errors are the caller's to swallow."""
     row = nvr.execute("SELECT start, path, init FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
         return 0
@@ -73,33 +69,48 @@ def process_segment(nvr, cur, seg_id):
     return len(dets)
 
 
+def _due(nvr, last):
+    rows = nvr.execute("SELECT id FROM segments WHERE id > ? AND stream = ? ORDER BY id LIMIT ?",
+                       (last, STREAM, BATCH * STRIDE)).fetchall()
+    return [r[0] for r in rows if r[0] % STRIDE == 0]
+
+
 def run():
-    orc = connect(); cur = orc.cursor()
     nvr = ro_nvr()
-    newest = nvr.execute("SELECT max(id) FROM segments WHERE stream = ?", (STREAM,)).fetchone()[0] or 0
-    last = get_state(cur, "last_seg_id", newest)       # first run: start at the live edge
-    print(f"detect poller: starting at seg {last} (newest {newest}), stride {STRIDE}", flush=True)
-    while True:
-        rows = nvr.execute("SELECT id FROM segments WHERE id > ? AND stream = ? ORDER BY id LIMIT ?",
-                           (last, STREAM, BATCH * STRIDE)).fetchall()
-        ids = [r[0] for r in rows if r[0] % STRIDE == 0]
-        if not ids:
-            time.sleep(IDLE)
-            continue
-        n = 0
-        for sid in ids:
-            try:
-                n += process_segment(nvr, cur, sid)
-            except Exception as e:
-                print(f"  seg {sid} error: {e}", flush=True)
-            last = sid
-        set_state(cur, "last_seg_id", last); orc.commit()
-        if n:
-            print(f"  up to seg {last}: {n} person-detection(s) stored", flush=True)
+    while True:                                           # reconnect loop: a DB error drops to here
+        orc = None
+        try:
+            orc = adb.connect(); cur = orc.cursor()
+            newest = nvr.execute("SELECT max(id) FROM segments WHERE stream = ?", (STREAM,)).fetchone()[0] or 0
+            last = get_state(cur, "last_seg_id", newest)  # first run: start at the live edge
+            print(f"detect poller: starting at seg {last} (newest {newest}), stride {STRIDE}", flush=True)
+            while True:
+                ids = _due(nvr, last)
+                if not ids:
+                    time.sleep(IDLE); continue
+                n = 0
+                for sid in ids:
+                    try:
+                        n += process_segment(nvr, cur, sid)
+                    except oracledb.DatabaseError:
+                        raise                              # connection trouble -> reconnect, keep `last`
+                    except Exception as e:
+                        print(f"  seg {sid} decode/skip: {e}", flush=True)  # bad frame: skip it
+                    last = sid
+                set_state(cur, "last_seg_id", last); orc.commit()  # inserts+cursor advance commit together
+                if n:
+                    print(f"  up to seg {last}: {n} person-detection(s) stored", flush=True)
+        except oracledb.DatabaseError as e:
+            print(f"oracle error; reconnecting in {RETRY}s: {e}", flush=True)
+            time.sleep(RETRY)
+        finally:
+            if orc is not None:
+                try: orc.close()
+                except Exception: pass
 
 
 def backfill(a, b):
-    orc = connect(); cur = orc.cursor(); nvr = ro_nvr()
+    orc = adb.connect(); cur = orc.cursor(); nvr = ro_nvr()
     ids = [r[0] for r in nvr.execute(
         "SELECT id FROM segments WHERE id BETWEEN ? AND ? AND stream = ? ORDER BY id",
         (a, b, STREAM)).fetchall() if r[0] % STRIDE == 0]
