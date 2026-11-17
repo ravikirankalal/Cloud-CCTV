@@ -1,0 +1,23 @@
+[Unit]
+Description=NVR people / feedback API (decoupled; reads Oracle vector DB + nvr.db read-only)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nvr
+Environment=NVR_DATA=/home/ubuntu/nvr-data
+Environment=DETAPI_PORT=3401
+ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_api.py
+Restart=always
+RestartSec=10
+# light service (no models loaded), but still keep it off the recorder's back on this 1GB box.
+Nice=10
+CPUWeight=30
+IOWeight=30
+MemoryHigh=200M
+MemoryMax=260M
+
+[Install]
+WantedBy=multi-user.target
