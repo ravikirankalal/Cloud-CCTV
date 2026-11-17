@@ -60,6 +60,10 @@ h2:first-of-type{margin-top:6px}
 .thumb img{width:100%;height:100%;object-fit:cover;display:block}
 .thumb .sc{position:absolute;left:5px;bottom:5px;background:rgba(8,11,15,.72);backdrop-filter:blur(6px);
   font-size:10.5px;padding:2px 6px;border-radius:6px;color:var(--muted);font-variant-numeric:tabular-nums}
+.thumb .cnt{position:absolute;right:5px;top:5px;display:inline-flex;align-items:center;gap:3px;
+  background:var(--rec);color:#00122b;font-weight:700;font-size:11px;padding:2px 7px;border-radius:999px;
+  box-shadow:0 2px 8px rgba(0,0,0,.45);font-variant-numeric:tabular-nums}
+.thumb .cnt::before{content:"";width:5px;height:5px;border-radius:50%;background:#00122b;opacity:.55}
 .empty{color:var(--faint);font-size:14px;padding:18px 2px}
 .note{color:var(--muted);font-size:13px;padding:14px;background:var(--panel);border:1px solid var(--line);
   border-radius:var(--radius-sm)}
@@ -73,6 +77,7 @@ h2:first-of-type{margin-top:6px}
 .sheet .big{width:132px;aspect-ratio:3/4;object-fit:cover;border-radius:12px;border:1px solid var(--line);float:left;margin:0 14px 10px 0;background:var(--bg2)}
 .sheet h3{margin:2px 0 2px;font-size:16px}
 .sheet .sub{color:var(--muted);font-size:12.5px;margin-bottom:12px}
+.sheet .meta-line{font-size:12px;color:var(--rec);margin:0 0 10px;letter-spacing:.2px;line-height:1.45}
 .field{display:flex;gap:8px;margin:10px 0 4px;clear:both}
 .field input{flex:1;min-height:46px;background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius-sm);
   color:var(--text);font:inherit;padding:0 14px}
@@ -129,6 +134,21 @@ function toast(msg, bad){ const t=$('toast'); t.textContent=msg; t.className='to
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const cropUrl = id => `/detapi/crop/${id}.jpg`;
 const hideBroken = img => { img.onerror = () => { const t=img.closest('.thumb,.card'); if(t) t.remove(); }; };
+// all times are rendered in the viewer's own timezone
+const _dt = ts => new Date(ts*1000);
+const clk = ts => _dt(ts).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+function tileWhen(ts){                                    // compact label for a thumbnail
+  const d=_dt(ts), now=new Date();
+  if (d.toDateString()===now.toDateString()) return clk(ts);
+  return d.toLocaleDateString([], {day:'2-digit', month:'short'}) + ' ' + clk(ts);
+}
+const fullWhen = ts => _dt(ts).toLocaleString([], {weekday:'short', day:'2-digit', month:'short', hour:'2-digit', minute:'2-digit', second:'2-digit'});
+function relWhen(ts){
+  const s = Date.now()/1000 - ts;
+  if (s<60) return 'just now'; if (s<3600) return Math.floor(s/60)+'m ago';
+  if (s<86400) return Math.floor(s/3600)+'h ago';
+  const d=Math.floor(s/86400); return d<30 ? d+'d ago' : _dt(ts).toLocaleDateString([], {day:'2-digit', month:'short'});
+}
 
 async function load(){
   $('loading').hidden = false; $('main').hidden = true; $('auth').hidden = true;
@@ -149,7 +169,7 @@ function renderPeople(people){
   $('people').innerHTML = people.map(p => `
     <button class="card" onclick="openPerson(${p.id})">
       ${p.sample ? `<img class="ph" src="${cropUrl(p.sample)}" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="ph"></span>`}
-      <span class="meta"><span class="nm">${esc(p.name)}</span><span class="ct">${p.count} sighting${p.count===1?'':'s'}</span></span>
+      <span class="meta"><span class="nm">${esc(p.name)}</span><span class="ct">${p.count} sighting${p.count===1?'':'s'}${p.last ? ` · ${relWhen(p.last)}` : ''}</span></span>
     </button>`).join('');
 }
 
@@ -157,23 +177,27 @@ function renderUnknowns(unk){
   $('un').textContent = unk.length ? unk.length : '';
   $('unknowns-empty').hidden = unk.length > 0;
   $('unknowns').innerHTML = unk.map(d => `
-    <button class="thumb" onclick="openTag(${d.id})">
+    <button class="thumb" onclick="openTag(${d.id}, ${d.count}, ${d.ts}, ${d.first}, ${d.score})">
       <img src="${cropUrl(d.id)}" loading="lazy" data-id="${d.id}">
-      <span class="sc mono">${d.score.toFixed(2)}</span>
+      ${d.count > 1 ? `<span class="cnt mono">${d.count}</span>` : ''}
+      <span class="sc mono">${tileWhen(d.ts)}</span>
     </button>`).join('');
   $('unknowns').querySelectorAll('img').forEach(hideBroken);
 }
 
 function closeSheet(){ $('sheet-host').innerHTML=''; }
 
-function openTag(id){
+function openTag(id, count, ts, first, score){
+  const grouped = count > 1;
+  const when = grouped ? `${count} sightings · ${fullWhen(first)} → ${clk(ts)}` : `Captured ${fullWhen(ts)}`;
   const chips = PEOPLE.map(p => `<button class="chip" onclick="assign(${id}, ${JSON.stringify(p.name)})">${esc(p.name)}</button>`).join('');
   $('sheet-host').innerHTML = `
     <div class="scrim" onclick="if(event.target===this)closeSheet()">
       <div class="sheet" role="dialog" aria-label="Name this person">
         <img class="big" src="${cropUrl(id)}" onerror="this.style.visibility='hidden'">
         <h3>Who is this?</h3>
-        <div class="sub">Name them to add a known person, or pick someone already tagged.</div>
+        <div class="meta-line mono">${when} · ${Math.round(score*100)}% match</div>
+        <div class="sub">${grouped ? `Naming them labels all <b>${count}</b> grouped sightings at once.` : 'Name them to add a known person, or pick someone already tagged.'}</div>
         <div class="field">
           <input id="nm" placeholder="Name" autocomplete="off" enterkeyhint="done">
           <button onclick="assign(${id}, $('nm').value)">Tag</button>
@@ -196,6 +220,7 @@ function openPerson(pid){
       <div class="sheet" role="dialog" aria-label="Person">
         ${p.sample ? `<img class="big" src="${cropUrl(p.sample)}" onerror="this.style.visibility='hidden'">` : ''}
         <h3>${esc(p.name)}</h3>
+        ${p.last ? `<div class="meta-line mono">${p.first && p.first < p.last ? `${fullWhen(p.first)} → ${fullWhen(p.last)}` : `Seen ${fullWhen(p.last)}`}</div>` : ''}
         <div class="sub">${p.count} sighting${p.count===1?'':'s'} matched to this person.</div>
         <div class="row"><button class="cancel" onclick="closeSheet()">Close</button></div>
       </div>

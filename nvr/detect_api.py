@@ -82,7 +82,7 @@ def has_crop(det_id):
 # ---- queries ----
 def people():
     def q(cur):
-        cur.execute("""SELECT i.id, i.name, COUNT(d.id)
+        cur.execute("""SELECT i.id, i.name, COUNT(d.id), MIN(d.ts), MAX(d.ts)
                        FROM identities i LEFT JOIN detections d ON d.identity_id = i.id
                        WHERE i.kind = 'known'
                        GROUP BY i.id, i.name ORDER BY LOWER(i.name)""")
@@ -100,36 +100,46 @@ def people():
     for r in db(q):
         ident_id = int(r[0])
         out.append({"id": ident_id, "name": r[1], "count": int(r[2]),
+                    "first": float(r[3]) if r[3] is not None else None,
+                    "last": float(r[4]) if r[4] is not None else None,
                     "sample": db(lambda cur: pick_sample(cur, ident_id))})
     return out
 
 
 def unknowns(limit):
+    """Unknown detections GROUPED by duplicate-cluster: one tile per person. Each entry's `id` is the
+    representative (best-scoring crop) and `count` is how many detections the group holds. Tagging
+    that id names the whole group (detect_service assigned the cluster_id)."""
     def q(cur):
-        cur.execute("""SELECT id, ts, seg_id, score FROM detections
-                       WHERE identity_id IS NULL
-                       ORDER BY ts DESC FETCH FIRST :1 ROWS ONLY""", [limit * 4])
+        cur.execute("""SELECT id, ts, score, NVL(cluster_id, id) grp FROM detections
+                       WHERE identity_id IS NULL ORDER BY ts DESC""")
         return cur.fetchall()
-    out = []
-    for r in db(q):
-        if has_crop(int(r[0])):
-            out.append({"id": int(r[0]), "ts": float(r[1]),
-                        "seg_id": int(r[2]) if r[2] else None, "score": round(float(r[3]), 2)})
-            if len(out) >= limit:
-                break
-    return out
+    groups = {}
+    for did, ts, score, grp in db(q):
+        did, grp, ts, score = int(did), int(grp), float(ts), round(float(score), 2)
+        if not has_crop(did):
+            continue
+        g = groups.get(grp)
+        if g is None:
+            g = groups[grp] = {"id": did, "count": 0, "score": score, "ts": ts, "first": ts}
+        g["count"] += 1
+        if score > g["score"]:                  # representative = best-scoring crop in the group
+            g["id"], g["score"] = did, score
+        g["ts"] = max(g["ts"], ts)              # ts = most recent sighting; first = earliest
+        g["first"] = min(g["first"], ts)
+    return sorted(groups.values(), key=lambda x: x["ts"], reverse=True)[:limit]
 
 
 def tag(det_id, name):
     def w(cur):
-        ident = match.tag(cur, det_id, name)
+        ident = match.tag_cluster(cur, det_id, name)   # names the whole duplicate-group at once
         changed = match.rematch(cur)
         return {"ok": True, "identity": ident, "rematched": changed}
     return db(w, write=True)
 
 
 def reject(det_id):
-    return db(lambda cur: (match.reject(cur, det_id), {"ok": True})[1], write=True)
+    return db(lambda cur: (match.dismiss_cluster(cur, det_id), {"ok": True})[1], write=True)
 
 
 class H(BaseHTTPRequestHandler):

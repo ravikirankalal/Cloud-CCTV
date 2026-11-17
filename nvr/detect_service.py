@@ -8,7 +8,10 @@
 #
 #   python detect_service.py run                          # live poller: process new segments forever
 #   python detect_service.py backfill <from_id> <to_id>   # process an explicit id range (test/catch-up)
+#   python detect_service.py backfill-crops               # make the static crop jpeg for stored rows
+#   python detect_service.py cluster                      # group unknown detections by re-ID (one-shot)
 import os, sys, time, sqlite3, array, importlib.util
+import numpy as np
 import oracledb
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -19,6 +22,7 @@ BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop bef
 IDLE = int(os.environ.get("DET_IDLE", "15"))             # sleep seconds when caught up
 RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnecting to Oracle after a DB error
 MATCH_DIST = float(os.environ.get("DET_MATCH", "0.28"))  # cosine distance < this => same known person
+CLUSTER_DIST = float(os.environ.get("DET_CLUSTER", "0.28"))  # cosine distance to group unknowns together
 CROP_DIR = os.path.join(DATA, "crops")                   # one static person-crop jpeg per detection
 
 os.makedirs(CROP_DIR, exist_ok=True)
@@ -89,6 +93,57 @@ def process_segment(nvr, cur, seg_id):
     return len(dets)
 
 
+def _cluster(cur):
+    """Group the still-UNKNOWN detections (identity_id IS NULL) by re-ID similarity so the UI can show
+    one tile per person instead of a tile per frame. CONNECTED COMPONENTS over L2-normalized OSNet
+    embeddings (pure vector math): two detections within CLUSTER_DIST are linked, and the link is
+    transitive, so a person drifting across poses/time collapses into ONE group even when the first
+    and last frame aren't themselves within threshold. Group id = smallest member id. Returns the
+    number of groups. Light; safe to re-run."""
+    cur.execute("SELECT id, embedding FROM detections WHERE identity_id IS NULL ORDER BY id")
+    rows = cur.fetchall()
+    if not rows:
+        return 0
+    ids = [int(r[0]) for r in rows]
+    E = np.asarray([np.asarray(r[1], dtype=np.float32) for r in rows])  # n x 512, already unit-norm
+    n = len(ids)
+    sim = E @ E.T                               # cosine similarity (unit vectors); distance = 1 - sim
+    parent = list(range(n))
+
+    def find(x):
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    thr = 1.0 - CLUSTER_DIST
+    for i in range(n):
+        for j in np.where(sim[i] >= thr)[0]:    # neighbors within CLUSTER_DIST
+            j = int(j)
+            if j > i:
+                ri, rj = find(i), find(j)
+                if ri != rj:
+                    parent[max(ri, rj)] = min(ri, rj)   # union, keep the lower index as root
+
+    comp = {}
+    for i in range(n):
+        comp.setdefault(find(i), []).append(i)
+    updates = []
+    for members in comp.values():
+        cid = min(ids[m] for m in members)      # stable group id: smallest detection id in the group
+        updates.extend((cid, ids[m]) for m in members)
+    cur.executemany("UPDATE detections SET cluster_id = :1 WHERE id = :2", updates)
+    return len(comp)
+
+
+def cluster_unknowns():
+    """CLI/entry wrapper for _cluster with its own connection."""
+    orc = adb.connect(); cur = orc.cursor()
+    n = _cluster(cur); orc.commit(); orc.close()
+    print(f"clustered unknown detections into {n} group(s) (thr {CLUSTER_DIST})", flush=True)
+    return n
+
+
 def _due(nvr, last):
     rows = nvr.execute("SELECT id FROM segments WHERE id > ? AND stream = ? ORDER BY id LIMIT ?",
                        (last, STREAM, BATCH * STRIDE)).fetchall()
@@ -120,6 +175,13 @@ def run():
                 set_state(cur, "last_seg_id", last); orc.commit()  # inserts+cursor advance commit together
                 if n:
                     print(f"  up to seg {last}: {n} person-detection(s) stored", flush=True)
+                    try:
+                        g = _cluster(cur); orc.commit()
+                        print(f"    grouped unknowns into {g} cluster(s)", flush=True)
+                    except oracledb.DatabaseError:
+                        raise                                       # connection trouble -> reconnect
+                    except Exception as e:
+                        print(f"    cluster skip: {e}", flush=True)
         except oracledb.DatabaseError as e:
             print(f"oracle error; reconnecting in {RETRY}s: {e}", flush=True)
             time.sleep(RETRY)
@@ -178,5 +240,7 @@ if __name__ == "__main__":
         backfill(int(sys.argv[2]), int(sys.argv[3]))
     elif len(sys.argv) >= 2 and sys.argv[1] == "backfill-crops":
         backfill_crops()
+    elif len(sys.argv) >= 2 and sys.argv[1] == "cluster":
+        cluster_unknowns()
     else:
         sys.exit(__doc__)

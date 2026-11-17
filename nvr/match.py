@@ -35,10 +35,52 @@ def tag(cur, detection_id, name):
     return ident
 
 
+def tag_cluster(cur, detection_id, name):
+    """Tag a whole duplicate-group at once: assign `name`'s identity to every still-unconfirmed
+    detection sharing this one's cluster_id, and confirm the tapped detection as ground truth.
+    Falls back to tagging just this detection when it isn't clustered."""
+    ident = get_or_create_identity(cur, name)
+    cur.execute("SELECT cluster_id FROM detections WHERE id = :1", [detection_id])
+    row = cur.fetchone()
+    cid = row[0] if row else None
+    if cid is not None:
+        cur.execute("UPDATE detections SET identity_id = :1 WHERE cluster_id = :2 AND confirmed = 0",
+                    [ident, cid])
+    cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [ident, detection_id])
+    cur.execute("INSERT INTO labels (detection_id, identity_id, action) VALUES (:1, :2, 'name')",
+                [detection_id, ident])
+    return ident
+
+
 def reject(cur, detection_id):
     """User feedback: this auto-label is wrong. Clear it and remember the correction."""
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'reject')", [detection_id])
     cur.execute("UPDATE detections SET identity_id = NULL WHERE id = :1 AND confirmed = 0", [detection_id])
+
+
+HIDDEN = "·not-a-person·"     # reserved identity for dismissed (non-person / junk) groups
+
+
+def dismiss_cluster(cur, detection_id):
+    """'Not a person' feedback: move this detection's whole duplicate-group out of the unknown pool
+    by assigning it to a reserved hidden identity (kind='hidden', never shown as a known person)."""
+    cur.execute("SELECT id FROM identities WHERE name = :1 AND kind = 'hidden'", [HIDDEN])
+    row = cur.fetchone()
+    if row:
+        hid = int(row[0])
+    else:
+        idv = cur.var(oracledb.NUMBER)
+        cur.execute("INSERT INTO identities (name, kind) VALUES (:1, 'hidden') RETURNING id INTO :2",
+                    [HIDDEN, idv])
+        hid = int(idv.getvalue()[0])
+    cur.execute("SELECT cluster_id FROM detections WHERE id = :1", [detection_id])
+    r = cur.fetchone()
+    cid = r[0] if r else None
+    if cid is not None:
+        cur.execute("UPDATE detections SET identity_id = :1 WHERE cluster_id = :2 AND confirmed = 0", [hid, cid])
+    else:
+        cur.execute("UPDATE detections SET identity_id = :1 WHERE id = :2 AND confirmed = 0", [hid, detection_id])
+    cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'dismiss')", [detection_id])
 
 
 def rematch(cur, thr=DEFAULT_THR):
