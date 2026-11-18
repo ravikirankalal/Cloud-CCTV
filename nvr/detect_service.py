@@ -2,7 +2,7 @@
 # Person-detection poller. Samples recorded segments, detects + embeds people, assigns each to a
 # known identity by vector distance (or leaves it unknown), and writes to the Oracle 23ai vector DB.
 #
-# DECOUPLED by design: reads nvr.db READ-ONLY (immutable), writes ONLY to Oracle, imports no recorder
+# DECOUPLED by design: reads nvr.db READ-ONLY (mode=ro, WAL-visible), writes ONLY to Oracle, imports no recorder
 # code, opens no recorder sockets, never touches the live path. It can lag, stop, or restart with zero
 # effect on recording. Meant to run under systemd with MemoryMax + Nice on this small box.
 #
@@ -34,7 +34,11 @@ detect = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(detect
 
 
 def ro_nvr():
-    return sqlite3.connect(f"file:{os.path.join(DATA, 'nvr.db')}?mode=ro&immutable=1", uri=True)
+    # mode=ro (NOT immutable): the recorder writes nvr.db in WAL mode, so new segments live in the -wal
+    # file until a checkpoint. immutable=1 reads only the main db file and ignores the WAL, freezing the
+    # poller at the last checkpoint (it never sees live segments). A plain read-only handle reads the WAL
+    # and sees the live edge, and WAL still lets the recorder write concurrently without blocking.
+    return sqlite3.connect(f"file:{os.path.join(DATA, 'nvr.db')}?mode=ro", uri=True)
 
 
 def match_known(cur, emb):
