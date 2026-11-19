@@ -11,9 +11,11 @@
 #
 #   GET  /detapi/people                 known people: [{id,name,count,sample}]
 #   GET  /detapi/unknowns?limit=N       recent un-identified detections: [{id,ts,seg_id,score}]
+#   GET  /detapi/person?id=N            one identity's crops: {name, detections:[{id,ts,score}]}
 #   GET  /detapi/crop/<id>.jpg          the person crop for one detection (decoded on demand, cached)
-#   POST /detapi/tag     {id,name}      name a detection -> known identity, then re-match history
-#   POST /detapi/reject  {id}           clear a wrong auto-label
+#   POST /detapi/tag      {id|ids,name} name one/many groups -> known identity, then re-match history
+#   POST /detapi/reject   {id|ids}      mark one/many groups 'not a person' (hidden)
+#   POST /detapi/unassign {id|ids}      remove detection(s) from their identity, back to the unknown pool
 import json
 import os
 import threading
@@ -106,6 +108,29 @@ def people():
     return out
 
 
+def person(ident_id):
+    """Every crop currently on one identity, newest first, confirmed ground truth ahead of re-matched.
+    Backs the person detail view where the user prunes wrong crops."""
+    def q(cur):
+        cur.execute("SELECT name FROM identities WHERE id = :1", [ident_id])
+        nm = cur.fetchone()
+        cur.execute("""SELECT id, ts, score FROM detections WHERE identity_id = :1
+                       ORDER BY confirmed DESC, ts DESC FETCH FIRST 500 ROWS ONLY""", [ident_id])
+        return (nm[0] if nm else None), cur.fetchall()
+    name, rows = db(q)
+    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
+            for d, t, s in rows if has_crop(int(d))]
+    return {"name": name, "detections": dets}
+
+
+def unassign(det_ids):
+    def w(cur):
+        for did in det_ids:
+            match.unassign(cur, did)
+        return {"ok": True, "count": len(det_ids)}
+    return db(w, write=True)
+
+
 def unknowns(limit):
     """Unknown detections GROUPED by duplicate-cluster: one tile per person. Each entry's `id` is the
     representative (best-scoring crop) and `count` is how many detections the group holds. Tagging
@@ -130,16 +155,28 @@ def unknowns(limit):
     return sorted(groups.values(), key=lambda x: x["ts"], reverse=True)[:limit]
 
 
-def tag(det_id, name):
+def _ids(b):
+    """Accept either {id} (single group) or {ids:[...]} (batch), as a de-duped list of ints."""
+    raw = b["ids"] if isinstance(b.get("ids"), list) else ([b["id"]] if "id" in b else [])
+    return list(dict.fromkeys(int(x) for x in raw))
+
+
+def tag(det_ids, name):
     def w(cur):
-        ident = match.tag_cluster(cur, det_id, name)   # names the whole duplicate-group at once
-        changed = match.rematch(cur)
-        return {"ok": True, "identity": ident, "rematched": changed}
+        ident = None
+        for did in det_ids:
+            ident = match.tag_cluster(cur, did, name)  # names each whole duplicate-group
+        changed = match.rematch(cur)                    # one re-match covers the whole batch
+        return {"ok": True, "identity": ident, "rematched": changed, "count": len(det_ids)}
     return db(w, write=True)
 
 
-def reject(det_id):
-    return db(lambda cur: (match.dismiss_cluster(cur, det_id), {"ok": True})[1], write=True)
+def reject(det_ids):
+    def w(cur):
+        for did in det_ids:
+            match.dismiss_cluster(cur, did)
+        return {"ok": True, "count": len(det_ids)}
+    return db(w, write=True)
 
 
 class H(BaseHTTPRequestHandler):
@@ -176,6 +213,8 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/detapi/unknowns":
                 lim = min(int(q.get("limit", [UNKNOWN_LIMIT])[0]), UNKNOWN_LIMIT)
                 return self.send(200, json.dumps(unknowns(lim)))
+            if u.path == "/detapi/person":
+                return self.send(200, json.dumps(person(int(q["id"][0]))))
             if u.path.startswith("/detapi/crop/") and u.path.endswith(".jpg"):
                 det_id = int(u.path[len("/detapi/crop/"):-4])
                 p = crop_file(det_id)
@@ -196,13 +235,20 @@ class H(BaseHTTPRequestHandler):
             b = self.body_json()
             if u.path == "/detapi/tag":
                 name = str(b.get("name", "")).strip()
-                if not name or "id" not in b:
-                    return self.err(400, "need id and name")
-                return self.send(200, json.dumps(tag(int(b["id"]), name)))
+                ids = _ids(b)
+                if not name or not ids:
+                    return self.err(400, "need id(s) and name")
+                return self.send(200, json.dumps(tag(ids, name)))
             if u.path == "/detapi/reject":
-                if "id" not in b:
-                    return self.err(400, "need id")
-                return self.send(200, json.dumps(reject(int(b["id"]))))
+                ids = _ids(b)
+                if not ids:
+                    return self.err(400, "need id(s)")
+                return self.send(200, json.dumps(reject(ids)))
+            if u.path == "/detapi/unassign":
+                ids = _ids(b)
+                if not ids:
+                    return self.err(400, "need id(s)")
+                return self.send(200, json.dumps(unassign(ids)))
             return self.err(404, "not found")
         except (KeyError, ValueError) as e:
             return self.err(400, str(e))

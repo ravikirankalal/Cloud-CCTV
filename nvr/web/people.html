@@ -64,6 +64,25 @@ h2:first-of-type{margin-top:6px}
   background:var(--rec);color:#00122b;font-weight:700;font-size:11px;padding:2px 7px;border-radius:999px;
   box-shadow:0 2px 8px rgba(0,0,0,.45);font-variant-numeric:tabular-nums}
 .thumb .cnt::before{content:"";width:5px;height:5px;border-radius:50%;background:#00122b;opacity:.55}
+.thumb.sel{outline:3px solid var(--rec);outline-offset:-3px}
+.thumb .chk{position:absolute;left:5px;top:5px;width:22px;height:22px;border-radius:50%;background:rgba(8,11,15,.55);
+  border:1.5px solid rgba(255,255,255,.7);color:#00122b;align-items:center;justify-content:center;font-size:13px;
+  font-weight:800;display:none}
+body.selecting .thumb .chk{display:inline-flex}
+.thumb.sel .chk{background:var(--rec);border-color:var(--rec)}
+.actionbar{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  display:flex;gap:8px;align-items:center;background:var(--elev);border:1px solid var(--line2);border-radius:999px;
+  padding:8px 10px 8px 16px;box-shadow:var(--shadow);z-index:15;max-width:calc(100vw - 24px)}
+.actionbar .ct{font-size:13px;font-weight:600;white-space:nowrap;margin-right:2px}
+.actionbar button{min-height:40px;padding:0 13px}
+.actionbar .tag{background:var(--rec);border-color:transparent;color:#001;font-weight:700}
+.actionbar .rej{color:var(--warn);background:var(--panel2)}
+.actionbar .cancel{color:var(--muted);background:transparent;border-color:transparent}
+.actionbar button:disabled{opacity:.4;pointer-events:none}
+.psheet .crops{max-height:48vh;overflow:auto;margin:12px 0 4px;clear:both}
+.psheet .thumb .chk{display:none}
+.psheet .thumb.sel{outline-color:var(--warn)}
+.psheet .thumb.sel .chk{display:inline-flex;background:var(--warn);border-color:var(--warn)}
 .empty{color:var(--faint);font-size:14px;padding:18px 2px}
 .note{color:var(--muted);font-size:13px;padding:14px;background:var(--panel);border:1px solid var(--line);
   border-radius:var(--radius-sm)}
@@ -113,13 +132,19 @@ h2:first-of-type{margin-top:6px}
     <div class="people" id="people"></div>
     <div class="empty" id="people-empty" hidden>No one tagged yet — name someone below and they'll appear here.</div>
 
-    <h2>Unknown <span class="n" id="un"></span></h2>
+    <h2>Unknown <span class="n" id="un"></span><button class="ghost" id="selbtn" style="margin-left:auto" hidden>Select</button></h2>
     <div class="crops" id="unknowns"></div>
     <div class="empty" id="unknowns-empty" hidden>No un-identified detections right now.</div>
   </main>
 </div>
 
 <div id="sheet-host"></div>
+<div id="actionbar" class="actionbar" hidden>
+  <span class="ct" id="selct">0 selected</span>
+  <button class="tag" id="ab-tag">Tag</button>
+  <button class="rej" id="ab-rej">Not a person</button>
+  <button class="cancel" id="ab-cancel">Cancel</button>
+</div>
 <div id="toast" class="toast"></div>
 
 <script>
@@ -173,16 +198,93 @@ function renderPeople(people){
     </button>`).join('');
 }
 
+let UNK = [];            // current unknown groups
+let SEL = null;          // null = not selecting; otherwise a Set of selected rep ids
+
 function renderUnknowns(unk){
+  UNK = unk;
   $('un').textContent = unk.length ? unk.length : '';
   $('unknowns-empty').hidden = unk.length > 0;
+  $('selbtn').hidden = unk.length === 0;
+  if (SEL) for (const id of [...SEL]) if (!unk.some(d => d.id === id)) SEL.delete(id);  // drop vanished groups
   $('unknowns').innerHTML = unk.map(d => `
-    <button class="thumb" onclick="openTag(${d.id}, ${d.count}, ${d.ts}, ${d.first}, ${d.score})">
-      <img src="${cropUrl(d.id)}" loading="lazy" data-id="${d.id}">
+    <button type="button" class="thumb${SEL && SEL.has(d.id) ? ' sel' : ''}" data-id="${d.id}">
+      <img src="${cropUrl(d.id)}" loading="lazy">
+      <span class="chk">✓</span>
       ${d.count > 1 ? `<span class="cnt mono">${d.count}</span>` : ''}
       <span class="sc mono">${tileWhen(d.ts)}</span>
     </button>`).join('');
-  $('unknowns').querySelectorAll('img').forEach(hideBroken);
+  $('unknowns').querySelectorAll('.thumb').forEach(btn => {
+    const img = btn.querySelector('img'); if (img) hideBroken(img);
+    const id = parseInt(btn.dataset.id);
+    btn.addEventListener('click', () => onTile(id));
+    btn.addEventListener('contextmenu', e => { e.preventDefault(); enterSelect(id); });  // long-press / right-click
+  });
+  refreshSel();
+}
+
+// ---- multi-select ----
+function onTile(id){
+  if (SEL){ SEL.has(id) ? SEL.delete(id) : SEL.add(id); refreshSel(); return; }
+  const d = UNK.find(x => x.id === id);
+  if (d) openTag(d.id, d.count, d.ts, d.first, d.score);
+}
+function enterSelect(id){
+  if (!SEL){ SEL = new Set(); document.body.classList.add('selecting'); }
+  if (id != null) SEL.add(id);
+  refreshSel();
+}
+function exitSelect(){ SEL = null; document.body.classList.remove('selecting'); refreshSel(); }
+function refreshSel(){
+  $('unknowns').querySelectorAll('.thumb').forEach(btn =>
+    btn.classList.toggle('sel', !!SEL && SEL.has(parseInt(btn.dataset.id))));
+  const n = SEL ? SEL.size : 0;
+  $('actionbar').hidden = !SEL;
+  $('selbtn').textContent = SEL ? 'Done' : 'Select';
+  if (SEL){
+    $('selct').textContent = `${n} selected`;
+    $('ab-tag').disabled = n === 0; $('ab-rej').disabled = n === 0;
+  }
+}
+function selTotal(ids){ return UNK.filter(d => ids.includes(d.id)).reduce((s, d) => s + d.count, 0); }
+
+function openMultiTag(ids){
+  const g = ids.length, total = selTotal(ids);
+  const chips = PEOPLE.map(p => `<button type="button" class="chip" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join('');
+  $('sheet-host').innerHTML = `
+    <div class="scrim" onclick="if(event.target===this)closeSheet()">
+      <div class="sheet" role="dialog" aria-label="Name these people">
+        <h3>Tag ${g} group${g === 1 ? '' : 's'}</h3>
+        <div class="sub">Naming applies to all <b>${total}</b> sighting${total === 1 ? '' : 's'} across ${g} selected group${g === 1 ? '' : 's'}.</div>
+        <div class="field">
+          <input id="nm" placeholder="Name" autocomplete="off" enterkeyhint="done">
+          <button id="mtag">Tag</button>
+        </div>
+        ${chips ? `<div class="chips">${chips}</div>` : ''}
+        <div class="row"><button class="cancel" onclick="closeSheet()">Cancel</button></div>
+      </div>
+    </div>`;
+  setTimeout(() => $('nm').focus(), 50);
+  const go = () => assignMany(ids, $('nm').value);
+  $('mtag').onclick = go;
+  $('nm').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  document.querySelectorAll('.sheet .chip').forEach(c =>
+    c.addEventListener('click', () => { const i = $('nm'); i.value = c.dataset.name; i.focus(); }));
+}
+
+async function assignMany(ids, name){
+  name = (name || '').trim();
+  if (!name){ toast('Enter a name', true); return; }
+  try{ const r = await api.post('/detapi/tag', { ids, name });
+    closeSheet(); exitSelect();
+    toast(`Tagged ${name} · ${ids.length} group${ids.length === 1 ? '' : 's'}${r.rematched ? ` · ${r.rematched} re-matched` : ''}`);
+    load();
+  }catch(e){ toast(e === 'auth' ? 'Sign in first' : 'Tag failed', true); }
+}
+async function dismissMany(ids){
+  try{ await api.post('/detapi/reject', { ids }); exitSelect();
+    toast(`Dismissed ${ids.length} group${ids.length === 1 ? '' : 's'}`); load();
+  }catch(e){ toast(e === 'auth' ? 'Sign in first' : 'Failed', true); }
 }
 
 function closeSheet(){ $('sheet-host').innerHTML=''; }
@@ -217,18 +319,54 @@ function openTag(id, count, ts, first, score){
     c.addEventListener('click', () => { const i = $('nm'); i.value = c.dataset.name; i.focus(); }));
 }
 
-function openPerson(pid){
+async function openPerson(pid){
   const p = PEOPLE.find(x => x.id===pid); if(!p) return;
   $('sheet-host').innerHTML = `
     <div class="scrim" onclick="if(event.target===this)closeSheet()">
-      <div class="sheet" role="dialog" aria-label="Person">
-        ${p.sample ? `<img class="big" src="${cropUrl(p.sample)}" onerror="this.style.visibility='hidden'">` : ''}
+      <div class="sheet psheet" role="dialog" aria-label="${esc(p.name)}">
         <h3>${esc(p.name)}</h3>
-        ${p.last ? `<div class="meta-line mono">${p.first && p.first < p.last ? `${fullWhen(p.first)} → ${fullWhen(p.last)}` : `Seen ${fullWhen(p.last)}`}</div>` : ''}
-        <div class="sub">${p.count} sighting${p.count===1?'':'s'} matched to this person.</div>
-        <div class="row"><button class="cancel" onclick="closeSheet()">Close</button></div>
+        <div class="sub" id="psub">${p.count} sighting${p.count===1?'':'s'} · tap any that aren't ${esc(p.name)} to remove</div>
+        <div class="crops" id="pcrops"><div class="spin"></div></div>
+        <div class="row">
+          <button class="reject" id="premove" hidden>Remove</button>
+          <button class="cancel" onclick="closeSheet()">Close</button>
+        </div>
       </div>
     </div>`;
+  let data;
+  try{ data = await api.get('/detapi/person?id='+pid); }
+  catch(e){ $('pcrops').innerHTML = `<div class="empty">${e==='auth'?'Sign in first':'Could not load images'}</div>`; return; }
+  const RM = new Set();
+  const base = () => `${data.detections.length} sighting${data.detections.length===1?'':'s'} · tap any that aren't ${esc(p.name)} to remove`;
+  function upd(){
+    const n = RM.size;
+    const btn = $('premove'); btn.hidden = n===0; btn.textContent = `Remove ${n}`;
+    $('psub').innerHTML = n ? `${n} marked to remove` : base();
+  }
+  function draw(){
+    const g = $('pcrops');
+    g.innerHTML = data.detections.length ? data.detections.map(d => `
+      <button type="button" class="thumb${RM.has(d.id)?' sel':''}" data-id="${d.id}">
+        <img src="${cropUrl(d.id)}" loading="lazy">
+        <span class="chk">✕</span>
+        <span class="sc mono">${tileWhen(d.ts)}</span>
+      </button>`).join('') : '<div class="empty">No images.</div>';
+    g.querySelectorAll('.thumb').forEach(b => {
+      const img = b.querySelector('img'); if(img) hideBroken(img);
+      b.addEventListener('click', () => {
+        const id = parseInt(b.dataset.id);
+        RM.has(id) ? RM.delete(id) : RM.add(id);
+        b.classList.toggle('sel'); upd();
+      });
+    });
+  }
+  draw(); upd();
+  $('premove').onclick = async () => {
+    const ids = [...RM]; if(!ids.length) return;
+    try{ await api.post('/detapi/unassign', {ids});
+      closeSheet(); toast(`Removed ${ids.length} from ${p.name}`); load();
+    }catch(e){ toast(e==='auth'?'Sign in first':'Remove failed', true); }
+  };
 }
 
 async function assign(id, name){
@@ -244,6 +382,10 @@ async function dismiss(id){
 }
 
 $('refresh').onclick = load;
+$('selbtn').onclick = () => SEL ? exitSelect() : enterSelect();
+$('ab-cancel').onclick = exitSelect;
+$('ab-tag').onclick = () => { if (SEL && SEL.size) openMultiTag([...SEL]); };
+$('ab-rej').onclick = () => { if (SEL && SEL.size) dismissMany([...SEL]); };
 load();
 </script>
 </body>

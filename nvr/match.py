@@ -64,6 +64,16 @@ def reject(cur, detection_id):
     cur.execute("UPDATE detections SET identity_id = NULL WHERE id = :1 AND confirmed = 0", [detection_id])
 
 
+def unassign(cur, detection_id):
+    """Remove ONE detection from whatever identity it's on, back to the unknown pool (identity_id NULL,
+    confirmed 0) — used when the user prunes a wrong crop from a tagged person. Clears confirmed too, so
+    it also works on a detection that a group tag had confirmed. A later rematch() only re-adds it if its
+    embedding is actually within the re-ID threshold of the person's remaining crops (i.e. it really is
+    them); a genuinely wrong crop stays out."""
+    cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'remove')", [detection_id])
+    cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 0 WHERE id = :1", [detection_id])
+
+
 HIDDEN = "·not-a-person·"     # reserved identity for dismissed (non-person / junk) groups
 
 
