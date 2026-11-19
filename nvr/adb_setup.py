@@ -62,10 +62,26 @@ ddl("""CREATE TABLE detect_state (
   v  NUMBER
 )""")
 
+# prototype gallery: a few spherical-k-means centroids per known person (match.rebuild_protos).
+# Matching runs against these, not every confirmed crop, so it stays cheap as the store grows.
+ddl("""CREATE TABLE person_protos (
+  identity_id NUMBER NOT NULL,
+  embedding   VECTOR(512, FLOAT32) NOT NULL
+)""")
+
 try:
     cur.execute("CREATE INDEX det_ts ON detections(ts)"); print("  created: det_ts")
 except oracledb.DatabaseError as e:
     print("  exists:  det_ts" if "ORA-00955" in str(e) else e)
+
+# IVF (on-disk) vector index for approximate nearest-neighbour over the growing detections table —
+# HNSW needs an in-memory vector pool (vector_memory_size=0 here), IVF does not. rematch() uses it.
+try:
+    cur.execute("""CREATE VECTOR INDEX det_emb_ivf ON detections (embedding)
+                   ORGANIZATION NEIGHBOR PARTITIONS DISTANCE COSINE WITH TARGET ACCURACY 95""")
+    print("  created: det_emb_ivf")
+except oracledb.DatabaseError as e:
+    print("  exists:  det_emb_ivf" if "ORA-00955" in str(e) else e)
 
 # --- VECTOR round-trip proof ---
 v = array.array("f", [0.1] * 512)
