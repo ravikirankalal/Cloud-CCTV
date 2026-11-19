@@ -192,7 +192,7 @@ function renderPeople(people){
   $('pn').textContent = people.length ? people.length : '';
   $('people-empty').hidden = people.length > 0;
   $('people').innerHTML = people.map(p => `
-    <button class="card" onclick="openPerson(${p.id})">
+    <button class="card" onclick="openDetail({id:${p.id},person:true})">
       ${p.sample ? `<img class="ph" src="${cropUrl(p.sample)}" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="ph"></span>`}
       <span class="meta"><span class="nm">${esc(p.name)}</span><span class="ct">${p.count} sighting${p.count===1?'':'s'}${p.last ? ` · ${relWhen(p.last)}` : ''}</span></span>
     </button>`).join('');
@@ -227,7 +227,7 @@ function renderUnknowns(unk){
 function onTile(id){
   if (SEL){ SEL.has(id) ? SEL.delete(id) : SEL.add(id); refreshSel(); return; }
   const d = UNK.find(x => x.id === id);
-  if (d) openTag(d.id, d.count, d.ts, d.first, d.score);
+  if (d) openDetail({ id: d.id });
 }
 function enterSelect(id){
   if (!SEL){ SEL = new Set(); document.body.classList.add('selecting'); }
@@ -287,57 +287,47 @@ async function dismissMany(ids){
   }catch(e){ toast(e === 'auth' ? 'Sign in first' : 'Failed', true); }
 }
 
-function closeSheet(){ $('sheet-host').innerHTML=''; }
+let DIRTY = false;   // a sheet action changed data -> reload the lists when the sheet closes
+function closeSheet(){ $('sheet-host').innerHTML=''; if(DIRTY){ DIRTY=false; load(); } }
 
-function openTag(id, count, ts, first, score){
-  const grouped = count > 1;
-  const when = grouped ? `${count} sightings · ${fullWhen(first)} → ${clk(ts)}` : `Captured ${fullWhen(ts)}`;
-  const chips = PEOPLE.map(p => `<button type="button" class="chip" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join('');
+// One detail sheet for BOTH an unknown group and a tagged person: a crop grid you can prune, plus an
+// editable name. For an unknown group the name tags it; for a person it renames (merging into an existing
+// same-name person). `o` = {id, person?}  (id = a group member for unknowns, the identity id for a person).
+async function openDetail(o){
+  const isP = !!o.person;
+  const self = isP ? PEOPLE.find(x => x.id === o.id) : null;
+  const curName = self ? self.name : '';
+  const chips = PEOPLE.filter(p => !isP || p.id !== o.id)
+    .map(p => `<button type="button" class="chip" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join('');
   $('sheet-host').innerHTML = `
     <div class="scrim" onclick="if(event.target===this)closeSheet()">
-      <div class="sheet" role="dialog" aria-label="Name this person">
-        <img class="big" src="${cropUrl(id)}" onerror="this.style.visibility='hidden'">
-        <h3>Who is this?</h3>
-        <div class="meta-line mono">${when} · ${Math.round(score*100)}% match</div>
-        <div class="sub">${grouped ? `Naming them labels all <b>${count}</b> grouped sightings at once.` : 'Name them to add a known person, or pick someone already tagged.'}</div>
+      <div class="sheet psheet" role="dialog" aria-label="${isP ? esc(curName) : 'Name this group'}">
+        <h3>${isP ? 'Edit person' : 'Who is this?'}</h3>
         <div class="field">
-          <input id="nm" placeholder="Name" autocomplete="off" enterkeyhint="done">
-          <button onclick="assign(${id}, $('nm').value)">Tag</button>
+          <input id="nm" placeholder="Name" autocomplete="off" enterkeyhint="done" value="${isP ? esc(curName) : ''}">
+          <button id="save">${isP ? 'Save' : 'Tag'}</button>
         </div>
         ${chips ? `<div class="chips">${chips}</div>` : ''}
-        <div class="row">
-          <button class="reject" onclick="dismiss(${id})">Not a person</button>
-          <button class="cancel" onclick="closeSheet()">Cancel</button>
-        </div>
-      </div>
-    </div>`;
-  setTimeout(() => $('nm').focus(), 50);
-  $('nm').addEventListener('keydown', e => { if(e.key==='Enter') assign(id, $('nm').value); });
-  // Tapping an existing person fills the name box (so you can confirm/edit before tagging) rather
-  // than tagging immediately — and sidesteps the quote-in-onclick bug that broke the old chips.
-  document.querySelectorAll('.sheet .chip').forEach(c =>
-    c.addEventListener('click', () => { const i = $('nm'); i.value = c.dataset.name; i.focus(); }));
-}
-
-async function openPerson(pid){
-  const p = PEOPLE.find(x => x.id===pid); if(!p) return;
-  $('sheet-host').innerHTML = `
-    <div class="scrim" onclick="if(event.target===this)closeSheet()">
-      <div class="sheet psheet" role="dialog" aria-label="${esc(p.name)}">
-        <h3>${esc(p.name)}</h3>
-        <div class="sub" id="psub">${p.count} sighting${p.count===1?'':'s'} · tap any that aren't ${esc(p.name)} to remove</div>
+        <div class="sub" id="psub"></div>
         <div class="crops" id="pcrops"><div class="spin"></div></div>
         <div class="row">
           <button class="reject" id="premove" hidden>Remove</button>
+          ${isP ? '' : `<button class="reject" id="pdismiss">Not a person</button>`}
           <button class="cancel" onclick="closeSheet()">Close</button>
         </div>
       </div>
     </div>`;
+  document.querySelectorAll('.sheet .chip').forEach(c =>
+    c.addEventListener('click', () => { const i = $('nm'); i.value = c.dataset.name; i.focus(); }));
+  if (!isP) setTimeout(() => $('nm').focus(), 50);
+
   let data;
-  try{ data = await api.get('/detapi/person?id='+pid); }
+  try{ data = await api.get((isP ? '/detapi/person?id=' : '/detapi/group?id=') + o.id); }
   catch(e){ $('pcrops').innerHTML = `<div class="empty">${e==='auth'?'Sign in first':'Could not load images'}</div>`; return; }
+  const dets = data.detections || [];
   const RM = new Set();
-  const base = () => `${data.detections.length} sighting${data.detections.length===1?'':'s'} · tap any that aren't ${esc(p.name)} to remove`;
+  const noun = isP ? `that aren't ${esc(curName)}` : `that don't belong`;
+  const base = () => dets.length ? `${dets.length} image${dets.length===1?'':'s'} · tap any ${noun} to remove` : 'No images.';
   function upd(){
     const n = RM.size;
     const btn = $('premove'); btn.hidden = n===0; btn.textContent = `Remove ${n}`;
@@ -345,7 +335,7 @@ async function openPerson(pid){
   }
   function draw(){
     const g = $('pcrops');
-    g.innerHTML = data.detections.length ? data.detections.map(d => `
+    g.innerHTML = dets.length ? dets.map(d => `
       <button type="button" class="thumb${RM.has(d.id)?' sel':''}" data-id="${d.id}">
         <img src="${cropUrl(d.id)}" loading="lazy">
         <span class="chk">✕</span>
@@ -361,24 +351,31 @@ async function openPerson(pid){
     });
   }
   draw(); upd();
+
+  $('save').onclick = async () => {
+    const name = $('nm').value.trim();
+    if(!name){ toast('Enter a name', true); return; }
+    try{
+      if (isP){ await api.post('/detapi/rename', {id:o.id, name}); toast(`Saved ${name}`); }
+      else { const r = await api.post('/detapi/tag', {id:o.id, name}); toast(`Tagged ${name}${r.rematched?` · ${r.rematched} re-matched`:''}`); }
+      DIRTY = true; closeSheet();
+    }catch(e){ toast(e==='auth'?'Sign in first':'Save failed', true); }
+  };
+  $('nm').addEventListener('keydown', e => { if(e.key==='Enter') $('save').click(); });
+
   $('premove').onclick = async () => {
     const ids = [...RM]; if(!ids.length) return;
     try{ await api.post('/detapi/unassign', {ids});
-      closeSheet(); toast(`Removed ${ids.length} from ${p.name}`); load();
+      for(const id of ids){ const i = dets.findIndex(d => d.id===id); if(i>=0) dets.splice(i,1); }
+      RM.clear(); draw(); upd(); DIRTY = true;       // keep the sheet open so you can still tag the rest
+      toast(`Removed ${ids.length}`);
     }catch(e){ toast(e==='auth'?'Sign in first':'Remove failed', true); }
   };
-}
 
-async function assign(id, name){
-  name = (name||'').trim();
-  if(!name){ toast('Enter a name', true); return; }
-  try{ const r = await api.post('/detapi/tag', {id, name});
-    closeSheet(); toast(`Tagged ${name}${r.rematched?` · ${r.rematched} re-matched`:''}`); load();
-  }catch(e){ toast(e==='auth'?'Sign in first':'Tag failed', true); }
-}
-async function dismiss(id){
-  try{ await api.post('/detapi/reject', {id}); closeSheet(); toast('Dismissed'); load(); }
-  catch(e){ toast(e==='auth'?'Sign in first':'Failed', true); }
+  if (!isP) $('pdismiss').onclick = async () => {
+    try{ await api.post('/detapi/reject', {id:o.id}); DIRTY = true; closeSheet(); toast('Dismissed'); }
+    catch(e){ toast(e==='auth'?'Sign in first':'Failed', true); }
+  };
 }
 
 $('refresh').onclick = load;

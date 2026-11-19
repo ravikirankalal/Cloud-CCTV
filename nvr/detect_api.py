@@ -12,10 +12,12 @@
 #   GET  /detapi/people                 known people: [{id,name,count,sample}]
 #   GET  /detapi/unknowns?limit=N       recent un-identified detections: [{id,ts,seg_id,score}]
 #   GET  /detapi/person?id=N            one identity's crops: {name, detections:[{id,ts,score}]}
+#   GET  /detapi/group?id=N             one unknown group's crops (N = a member): {grp, detections:[...]}
 #   GET  /detapi/crop/<id>.jpg          the person crop for one detection (decoded on demand, cached)
 #   POST /detapi/tag      {id|ids,name} name one/many groups -> known identity, then re-match history
 #   POST /detapi/reject   {id|ids}      mark one/many groups 'not a person' (hidden)
 #   POST /detapi/unassign {id|ids}      remove detection(s) from their identity, back to the unknown pool
+#   POST /detapi/rename   {id,name}     rename an identity (merges into an existing same-name person)
 import json
 import os
 import threading
@@ -123,11 +125,36 @@ def person(ident_id):
     return {"name": name, "detections": dets}
 
 
+def group(rep_id):
+    """Every unknown crop in one duplicate-group (the cluster the given representative belongs to).
+    Mirrors person() so the UI can open an unknown group the same way it opens a tagged person."""
+    def q(cur):
+        cur.execute("SELECT NVL(cluster_id, id) FROM detections WHERE id = :1", [rep_id])
+        r = cur.fetchone()
+        grp = int(r[0]) if r else int(rep_id)
+        cur.execute("""SELECT id, ts, score FROM detections
+                       WHERE identity_id IS NULL AND NVL(cluster_id, id) = :1
+                       ORDER BY score DESC FETCH FIRST 500 ROWS ONLY""", [grp])
+        return grp, cur.fetchall()
+    grp, rows = db(q)
+    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
+            for d, t, s in rows if has_crop(int(d))]
+    return {"grp": grp, "detections": dets}
+
+
 def unassign(det_ids):
     def w(cur):
         for did in det_ids:
             match.unassign(cur, did)
         return {"ok": True, "count": len(det_ids)}
+    return db(w, write=True)
+
+
+def rename(ident_id, name):
+    def w(cur):
+        surviving = match.rename(cur, ident_id, name)
+        changed = match.rematch(cur)
+        return {"ok": True, "identity": surviving, "rematched": changed}
     return db(w, write=True)
 
 
@@ -215,6 +242,8 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, json.dumps(unknowns(lim)))
             if u.path == "/detapi/person":
                 return self.send(200, json.dumps(person(int(q["id"][0]))))
+            if u.path == "/detapi/group":
+                return self.send(200, json.dumps(group(int(q["id"][0]))))
             if u.path.startswith("/detapi/crop/") and u.path.endswith(".jpg"):
                 det_id = int(u.path[len("/detapi/crop/"):-4])
                 p = crop_file(det_id)
@@ -249,6 +278,11 @@ class H(BaseHTTPRequestHandler):
                 if not ids:
                     return self.err(400, "need id(s)")
                 return self.send(200, json.dumps(unassign(ids)))
+            if u.path == "/detapi/rename":
+                name = str(b.get("name", "")).strip()
+                if not name or "id" not in b:
+                    return self.err(400, "need id and name")
+                return self.send(200, json.dumps(rename(int(b["id"]), name)))
             return self.err(404, "not found")
         except (KeyError, ValueError) as e:
             return self.err(400, str(e))
