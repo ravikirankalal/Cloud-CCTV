@@ -24,11 +24,16 @@ RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnec
 MATCH_DIST = float(os.environ.get("DET_MATCH", "0.28"))  # cosine distance < this => same known person
 CLUSTER_DIST = float(os.environ.get("DET_CLUSTER", "0.28"))  # cosine distance to group unknowns together
 CROP_DIR = os.path.join(DATA, "crops")                   # one static person-crop jpeg per detection
+BG_PATH = os.path.join(DATA, "detect_bg.npz")            # persisted motion-gate background model
+GATE_ENABLED = os.environ.get("DET_GATE", "1") != "0"    # skip YOLOX on empty (no-foreground) frames
+GATE_MIN_PX = int(os.environ.get("DET_GATE_MIN_PX", "140"))  # foreground blob px (160-wide grid) to trigger
+GATE_K = float(os.environ.get("DET_GATE_K", "2.5"))      # per-pixel std multiple for the background model
 
 os.makedirs(CROP_DIR, exist_ok=True)
 
 sys.path.insert(0, HERE)
 import adb                                                # shared Oracle connection
+from motion_gate import MotionGate                        # background-subtraction gate (skips YOLOX on empty frames)
 _spec = importlib.util.spec_from_file_location("detect", os.path.join(HERE, "detect.py"))
 detect = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(detect)
 
@@ -75,15 +80,21 @@ def _save_crop(frame, box, det_id):
         print(f"  crop {det_id} failed: {e}", flush=True)
 
 
-def process_segment(nvr, cur, seg_id):
+def process_segment(nvr, cur, seg_id, gate=None):
     """Detect+embed one segment's frame and insert its people, saving each one's crop jpeg while the
     frame is in hand. Returns the number of people stored. DB errors propagate (to trigger a
-    reconnect); decode errors are the caller's to swallow."""
+    reconnect); decode errors are the caller's to swallow.
+
+    The optional `gate` is a MotionGate: it is fed EVERY decoded frame in order (to keep its background
+    model current) and, on a frame with no foreground blob, we skip the ~0.9 s YOLOX+re-ID pass entirely.
+    Decode is codec-bound and happens either way; the gate's saving is the skipped YOLOX on empty frames."""
     row = nvr.execute("SELECT start, path, init FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
         return 0
     start, path, init = row
     frame = detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path))
+    if gate is not None and not gate.check(frame)[0]:
+        return 0                                          # empty scene: don't pay for YOLOX
     dets = detect.detect_embed(frame)
     for d in dets:
         emb = array.array("f", d["embedding"])
@@ -156,6 +167,9 @@ def _due(nvr, last):
 
 def run():
     nvr = ro_nvr()
+    gate = MotionGate(BG_PATH, min_px=GATE_MIN_PX, k=GATE_K) if GATE_ENABLED else None
+    if gate is not None:
+        print(f"motion gate ON (min_px={GATE_MIN_PX}, k={GATE_K}): YOLOX runs only on foreground frames", flush=True)
     while True:                                           # reconnect loop: a DB error drops to here
         orc = None
         try:
@@ -170,13 +184,15 @@ def run():
                 n = 0
                 for sid in ids:
                     try:
-                        n += process_segment(nvr, cur, sid)
+                        n += process_segment(nvr, cur, sid, gate)
                     except oracledb.DatabaseError:
                         raise                              # connection trouble -> reconnect, keep `last`
                     except Exception as e:
                         print(f"  seg {sid} decode/skip: {e}", flush=True)  # bad frame: skip it
                     last = sid
                 set_state(cur, "last_seg_id", last); orc.commit()  # inserts+cursor advance commit together
+                if gate is not None:
+                    gate.save()                            # persist the background model for restart recovery
                 if n:
                     print(f"  up to seg {last}: {n} person-detection(s) stored", flush=True)
                     try:
@@ -197,14 +213,18 @@ def run():
 
 def backfill(a, b):
     orc = adb.connect(); cur = orc.cursor(); nvr = ro_nvr()
+    # Ephemeral gate (path=None): a backfill over an arbitrary range must NOT clobber the live poller's
+    # persisted background model. It warms up over the range's own first frames.
+    gate = MotionGate(None, min_px=GATE_MIN_PX, k=GATE_K) if GATE_ENABLED else None
     ids = [r[0] for r in nvr.execute(
         "SELECT id FROM segments WHERE id BETWEEN ? AND ? AND stream = ? ORDER BY id",
         (a, b, STREAM)).fetchall() if r[0] % STRIDE == 0]
-    print(f"backfill {len(ids)} segments ({a}..{b}, stride {STRIDE})", flush=True)
+    print(f"backfill {len(ids)} segments ({a}..{b}, stride {STRIDE})"
+          + (f", motion gate min_px={GATE_MIN_PX}" if gate is not None else ""), flush=True)
     total = 0; t0 = time.time()
     for i, sid in enumerate(ids):
         try:
-            total += process_segment(nvr, cur, sid)
+            total += process_segment(nvr, cur, sid, gate)
         except Exception as e:
             print(f"  seg {sid} error: {e}", flush=True)
         if i % 10 == 9:
