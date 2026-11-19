@@ -43,16 +43,20 @@ def tag_cluster(cur, detection_id, name):
     person, and tag() runs rematch() straight after. rematch re-evaluates every confirmed=0 row and
     nulls the ones with no near KNOWN match — so if the group were left unconfirmed, any member whose
     embedding sits past the re-ID threshold from the tapped crop would be stripped back to unknown,
-    leaving the tag on only one. confirmed=1 makes the group label stick and seeds future re-ID."""
+    leaving the tag on only one. confirmed=1 makes the group label stick and seeds future re-ID.
+
+    But claim only UNCONFIRMED members (plus any already this identity) — never crops the user confirmed
+    as a DIFFERENT person. A crop removed from another group (unassign) keeps its old cluster_id until
+    re-clustered, and without this guard re-tagging it would drag its old cluster-mates along."""
     ident = get_or_create_identity(cur, name)
     cur.execute("SELECT cluster_id FROM detections WHERE id = :1", [detection_id])
     row = cur.fetchone()
     cid = row[0] if row else None
     if cid is not None:
-        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE cluster_id = :2",
-                    [ident, cid])
-    else:
-        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [ident, detection_id])
+        cur.execute("""UPDATE detections SET identity_id = :ident, confirmed = 1
+                       WHERE cluster_id = :cid AND (confirmed = 0 OR identity_id = :ident)""",
+                    {"ident": ident, "cid": cid})
+    cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [ident, detection_id])
     cur.execute("INSERT INTO labels (detection_id, identity_id, action) VALUES (:1, :2, 'name')",
                 [detection_id, ident])
     return ident
@@ -69,9 +73,29 @@ def unassign(cur, detection_id):
     confirmed 0) — used when the user prunes a wrong crop from a tagged person. Clears confirmed too, so
     it also works on a detection that a group tag had confirmed. A later rematch() only re-adds it if its
     embedding is actually within the re-ID threshold of the person's remaining crops (i.e. it really is
-    them); a genuinely wrong crop stays out."""
+    them); a genuinely wrong crop stays out.
+
+    Also DETACH it into its own cluster (cluster_id = id): it no longer shares the old group's cluster_id,
+    so re-tagging this one crop to another person can't drag its former cluster-mates with it. The next
+    _cluster() pass re-groups it among the unknowns by embedding."""
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'remove')", [detection_id])
-    cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 0 WHERE id = :1", [detection_id])
+    cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 0, cluster_id = id WHERE id = :1",
+                [detection_id])
+
+
+def rename(cur, ident_id, name):
+    """Rename an identity. If `name` already belongs to another known person, MERGE into them: move this
+    identity's detections and labels over and drop the now-empty identity. Returns the surviving id."""
+    cur.execute("SELECT id FROM identities WHERE name = :1 AND kind = 'known' AND id <> :2", [name, ident_id])
+    row = cur.fetchone()
+    if row:
+        target = int(row[0])
+        cur.execute("UPDATE detections SET identity_id = :1 WHERE identity_id = :2", [target, ident_id])
+        cur.execute("UPDATE labels SET identity_id = :1 WHERE identity_id = :2", [target, ident_id])
+        cur.execute("DELETE FROM identities WHERE id = :1", [ident_id])
+        return target
+    cur.execute("UPDATE identities SET name = :1 WHERE id = :2", [name, ident_id])
+    return ident_id
 
 
 HIDDEN = "·not-a-person·"     # reserved identity for dismissed (non-person / junk) groups
@@ -98,9 +122,12 @@ def dismiss_cluster(cur, detection_id):
     r = cur.fetchone()
     cid = r[0] if r else None
     if cid is not None:
-        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE cluster_id = :2", [hid, cid])
-    else:
-        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [hid, detection_id])
+        # Claim only unconfirmed members (plus any already hidden) — don't hide a crop the user confirmed
+        # as a real known person that happens to share this cluster_id.
+        cur.execute("""UPDATE detections SET identity_id = :hid, confirmed = 1
+                       WHERE cluster_id = :cid AND (confirmed = 0 OR identity_id = :hid)""",
+                    {"hid": hid, "cid": cid})
+    cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [hid, detection_id])
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'dismiss')", [detection_id])
 
 
