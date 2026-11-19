@@ -190,7 +190,7 @@ function closeSheet(){ $('sheet-host').innerHTML=''; }
 function openTag(id, count, ts, first, score){
   const grouped = count > 1;
   const when = grouped ? `${count} sightings · ${fullWhen(first)} → ${clk(ts)}` : `Captured ${fullWhen(ts)}`;
-  const chips = PEOPLE.map(p => `<button class="chip" onclick="assign(${id}, ${JSON.stringify(p.name)})">${esc(p.name)}</button>`).join('');
+  const chips = PEOPLE.map(p => `<button type="button" class="chip" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join('');
   $('sheet-host').innerHTML = `
     <div class="scrim" onclick="if(event.target===this)closeSheet()">
       <div class="sheet" role="dialog" aria-label="Name this person">
@@ -211,6 +211,10 @@ function openTag(id, count, ts, first, score){
     </div>`;
   setTimeout(() => $('nm').focus(), 50);
   $('nm').addEventListener('keydown', e => { if(e.key==='Enter') assign(id, $('nm').value); });
+  // Tapping an existing person fills the name box (so you can confirm/edit before tagging) rather
+  // than tagging immediately — and sidesteps the quote-in-onclick bug that broke the old chips.
+  document.querySelectorAll('.sheet .chip').forEach(c =>
+    c.addEventListener('click', () => { const i = $('nm'); i.value = c.dataset.name; i.focus(); }));
 }
 
 function openPerson(pid){
