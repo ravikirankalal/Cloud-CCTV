@@ -95,7 +95,7 @@ header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1;w
 .tl{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);
   padding:14px 16px 16px;box-shadow:var(--lift),var(--shadow)}
 .tlhead{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:13px}
-.tlhead .day{flex:1;text-align:center;font-weight:600;font-size:13.5px;min-width:80px;letter-spacing:.2px;font-variant-numeric:tabular-nums}
+.tlhead .day{flex:1;text-align:center;font-weight:600;font-size:13.5px;min-width:80px;letter-spacing:.2px;font-variant-numeric:tabular-nums;cursor:pointer;user-select:none}
 .tlhead .icon{width:44px;font-size:20px;line-height:1}
 .bar{position:relative;height:56px;touch-action:none;cursor:pointer;user-select:none;
   background:linear-gradient(180deg,#070a0e,#05080b);border-radius:10px}
@@ -174,8 +174,10 @@ dialog .close button{width:100%}
   <div class="tl">
     <div class="tlhead">
       <button class="icon" id="prevDay" aria-label="Previous day">‹</button>
-      <div class="day" id="dayLabel">Today</div>
+      <div class="day" id="dayLabel" role="button" tabindex="0" title="Pick a date">Today</div>
       <button class="icon" id="nextDay" aria-label="Next day">›</button>
+      <button class="icon" id="calBtn" aria-label="Pick a date">📅</button>
+      <input type="date" id="datePick" aria-hidden="true" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0">
       <span class="seg" id="zooms" role="group" aria-label="Timeline zoom"><button data-z="24">24h</button><button data-z="6">6h</button><button data-z="1" class="on">1h</button><button data-z="0.25">15m</button><button data-z="0.0833">5m</button></span>
     </div>
     <div class="bar" id="bar" role="group" aria-label="Recording timeline. Drag the handle to seek; drag or scroll to pan."><canvas id="cv" aria-label="Recorded coverage for the selected day"></canvas></div>
@@ -597,8 +599,18 @@ $('zooms').onclick = e => {
   const z = +e.target.dataset.z; if (!z) return; st.zoom = z; st.center = st.wall || now();
   for (const b of $('zooms').children) b.classList.toggle('on', +b.dataset.z === z); draw();
 };
-$('prevDay').onclick = () => { st.day = dayKey(dayStart(st.day) - 43200); st.center = dayStart(st.day) + 43200; loadSpans(); };
-$('nextDay').onclick = () => { st.day = dayKey(dayStart(st.day) + 129600); st.center = Math.min(now(), dayStart(st.day) + 43200); loadSpans(); };
+function goToDay(key) {                                   // jump the timeline to a given YYYY-MM-DD
+  if (key > dayKey(now())) return;                       // never past today
+  st.day = key; st.center = Math.min(now(), dayStart(key) + 43200); loadSpans(); ui();
+}
+$('prevDay').onclick = () => goToDay(dayKey(dayStart(st.day) - 43200));
+$('nextDay').onclick = () => goToDay(dayKey(dayStart(st.day) + 129600));
+// calendar: a hidden native date input, opened by the 📅 button or by tapping the day label
+const openPicker = () => { const d = $('datePick'); d.value = st.day; d.max = dayKey(now()); d.showPicker ? d.showPicker() : d.focus(); };
+$('calBtn').onclick = openPicker;
+$('dayLabel').onclick = openPicker;
+$('dayLabel').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openPicker(); } };
+$('datePick').onchange = e => { if (e.target.value) goToDay(e.target.value); };
 addEventListener('resize', draw);
 
 /* sound: HLS carries it in the video; the live relay sends it to a separate audio element.
