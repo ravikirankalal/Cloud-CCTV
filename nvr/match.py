@@ -36,17 +36,23 @@ def tag(cur, detection_id, name):
 
 
 def tag_cluster(cur, detection_id, name):
-    """Tag a whole duplicate-group at once: assign `name`'s identity to every still-unconfirmed
-    detection sharing this one's cluster_id, and confirm the tapped detection as ground truth.
-    Falls back to tagging just this detection when it isn't clustered."""
+    """Tag a whole duplicate-group at once: assign `name`'s identity to EVERY detection sharing this
+    one's cluster_id and CONFIRM them all. Falls back to the single detection when it isn't clustered.
+
+    Why confirm the whole group (not just the tapped crop): the user has asserted the group is this
+    person, and tag() runs rematch() straight after. rematch re-evaluates every confirmed=0 row and
+    nulls the ones with no near KNOWN match — so if the group were left unconfirmed, any member whose
+    embedding sits past the re-ID threshold from the tapped crop would be stripped back to unknown,
+    leaving the tag on only one. confirmed=1 makes the group label stick and seeds future re-ID."""
     ident = get_or_create_identity(cur, name)
     cur.execute("SELECT cluster_id FROM detections WHERE id = :1", [detection_id])
     row = cur.fetchone()
     cid = row[0] if row else None
     if cid is not None:
-        cur.execute("UPDATE detections SET identity_id = :1 WHERE cluster_id = :2 AND confirmed = 0",
+        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE cluster_id = :2",
                     [ident, cid])
-    cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [ident, detection_id])
+    else:
+        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [ident, detection_id])
     cur.execute("INSERT INTO labels (detection_id, identity_id, action) VALUES (:1, :2, 'name')",
                 [detection_id, ident])
     return ident
@@ -63,7 +69,12 @@ HIDDEN = "·not-a-person·"     # reserved identity for dismissed (non-person / 
 
 def dismiss_cluster(cur, detection_id):
     """'Not a person' feedback: move this detection's whole duplicate-group out of the unknown pool
-    by assigning it to a reserved hidden identity (kind='hidden', never shown as a known person)."""
+    by assigning it to a reserved hidden identity (kind='hidden', never shown as a known person).
+
+    confirmed=1 so the dismissal STICKS: a later tag() runs rematch(), which re-evaluates every
+    confirmed=0 row — a dismissed-but-unconfirmed group would have no near KNOWN match and get nulled
+    straight back to unknown. rematch only matches against kind='known', so a confirmed hidden row is
+    never used to auto-hide a real person near the junk cluster."""
     cur.execute("SELECT id FROM identities WHERE name = :1 AND kind = 'hidden'", [HIDDEN])
     row = cur.fetchone()
     if row:
@@ -77,18 +88,23 @@ def dismiss_cluster(cur, detection_id):
     r = cur.fetchone()
     cid = r[0] if r else None
     if cid is not None:
-        cur.execute("UPDATE detections SET identity_id = :1 WHERE cluster_id = :2 AND confirmed = 0", [hid, cid])
+        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE cluster_id = :2", [hid, cid])
     else:
-        cur.execute("UPDATE detections SET identity_id = :1 WHERE id = :2 AND confirmed = 0", [hid, detection_id])
+        cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [hid, detection_id])
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'dismiss')", [detection_id])
 
 
 def rematch(cur, thr=DEFAULT_THR):
-    """(Re)assign every UNCONFIRMED detection to the nearest CONFIRMED known person within `thr`.
-    Pure vector search over stored embeddings — no inference. Returns the number of rows changed."""
+    """(Re)assign every UNCONFIRMED detection to the nearest CONFIRMED KNOWN person within `thr`.
+    Pure vector search over stored embeddings — no inference. Returns the number of rows changed.
+
+    Matches only kind='known' (not the reserved hidden/'not-a-person' identity): a dismissed junk
+    cluster must never be propagated onto — or used to auto-hide — a real person that happens to sit
+    near it in embedding space. Confirmed rows (tagged or dismissed groups) are left untouched."""
     cur.execute("""UPDATE detections d SET identity_id = (
                      SELECT k.identity_id FROM detections k
-                     WHERE k.confirmed = 1 AND k.identity_id IS NOT NULL
+                     JOIN identities ki ON ki.id = k.identity_id
+                     WHERE k.confirmed = 1 AND ki.kind = 'known'
                        AND VECTOR_DISTANCE(k.embedding, d.embedding, COSINE) < :thr
                      ORDER BY VECTOR_DISTANCE(k.embedding, d.embedding, COSINE)
                      FETCH FIRST 1 ROWS ONLY)
