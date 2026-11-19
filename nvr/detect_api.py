@@ -158,6 +158,8 @@ def unassign(det_ids):
     def w(cur):
         for did in det_ids:
             match.unassign(cur, did)
+        match.rebuild_protos(cur)                 # affected people's galleries changed; re-propagate
+        match.rematch(cur)
         return {"ok": True, "count": len(det_ids)}
     return db(w, write=True)
 
@@ -165,6 +167,7 @@ def unassign(det_ids):
 def rename(ident_id, name):
     def w(cur):
         surviving = match.rename(cur, ident_id, name)
+        match.rebuild_protos(cur, surviving)
         changed = match.rematch(cur)
         return {"ok": True, "identity": surviving, "rematched": changed}
     return db(w, write=True)
@@ -220,6 +223,7 @@ def tag(det_ids, name):
         ident = None
         for did in det_ids:
             ident = match.tag_cluster(cur, did, name)  # names each whole duplicate-group
+        match.rebuild_protos(cur, ident)                # refresh this person's prototype gallery
         changed = match.rematch(cur)                    # one re-match covers the whole batch
         return {"ok": True, "identity": ident, "rematched": changed, "count": len(det_ids)}
     return db(w, write=True)

@@ -33,6 +33,7 @@ os.makedirs(CROP_DIR, exist_ok=True)
 
 sys.path.insert(0, HERE)
 import adb                                                # shared Oracle connection
+import match                                              # prototype gallery + nearest-proto live match
 from motion_gate import MotionGate                        # background-subtraction gate (skips YOLOX on empty frames)
 _spec = importlib.util.spec_from_file_location("detect", os.path.join(HERE, "detect.py"))
 detect = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(detect)
@@ -47,12 +48,10 @@ def ro_nvr():
 
 
 def match_known(cur, emb):
-    """Nearest CONFIRMED known detection by cosine distance; return its identity_id if close enough."""
-    cur.execute("""SELECT identity_id, VECTOR_DISTANCE(embedding, :1, COSINE) d
-                   FROM detections WHERE confirmed = 1 AND identity_id IS NOT NULL
-                   ORDER BY d FETCH FIRST 1 ROWS ONLY""", [emb])
-    row = cur.fetchone()
-    return row[0] if row and row[1] is not None and row[1] < MATCH_DIST else None
+    """Nearest known PROTOTYPE by cosine distance; return its identity_id if within MATCH_DIST.
+    Matches against the small per-person prototype gallery (match.rebuild_protos) rather than every
+    confirmed crop, so the live per-detection match stays cheap as the store grows."""
+    return match.nearest_proto(cur, emb, MATCH_DIST)
 
 
 def get_state(cur, k, default):
