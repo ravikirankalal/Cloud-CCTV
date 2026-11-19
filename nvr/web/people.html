@@ -83,6 +83,13 @@ body.selecting .thumb .chk{display:inline-flex}
 .psheet .thumb .chk{display:none}
 .psheet .thumb.sel{outline-color:var(--warn)}
 .psheet .thumb.sel .chk{display:inline-flex;background:var(--warn);border-color:var(--warn)}
+.datebar{display:flex;align-items:center;gap:8px;margin:2px 2px 18px}
+.datebar .icon{width:40px;min-height:40px;padding:0;font-size:18px;line-height:1}
+.datebar .dlabel{flex:1;text-align:center;font-weight:600;font-size:13.5px;cursor:pointer;user-select:none;
+  font-variant-numeric:tabular-nums;letter-spacing:.2px}
+.datebar .ghost{font-size:12.5px}
+.datebar .ghost.on{color:var(--rec);border-color:var(--rec)}
+.datebar button:disabled{opacity:.38;pointer-events:none}
 .empty{color:var(--faint);font-size:14px;padding:18px 2px}
 .note{color:var(--muted);font-size:13px;padding:14px;background:var(--panel);border:1px solid var(--line);
   border-radius:var(--radius-sm)}
@@ -128,6 +135,14 @@ body.selecting .thumb .chk{display:inline-flex}
   <div id="auth" class="note" hidden>You're not signed in. Open the <a href="/">live view</a> to sign in, then come back.</div>
   <div id="loading" class="spin"></div>
   <main id="main" hidden>
+    <div class="datebar">
+      <button class="icon" id="pPrev" aria-label="Previous day">‹</button>
+      <div class="dlabel" id="dLabel" role="button" tabindex="0" title="Pick a date">Today</div>
+      <button class="icon" id="pNext" aria-label="Next day">›</button>
+      <button class="icon" id="pCal" aria-label="Pick a date">📅</button>
+      <button class="ghost" id="pAll">All days</button>
+      <input type="date" id="pDate" aria-hidden="true" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0">
+    </div>
     <h2>People <span class="n" id="pn"></span></h2>
     <div class="people" id="people"></div>
     <div class="empty" id="people-empty" hidden>No one tagged yet — name someone below and they'll appear here.</div>
@@ -175,10 +190,30 @@ function relWhen(ts){
   const d=Math.floor(s/86400); return d<30 ? d+'d ago' : _dt(ts).toLocaleDateString([], {day:'2-digit', month:'short'});
 }
 
+// ---- date awareness: the People + Unknown lists scope to one IST day, or All ----
+const TZ = 'Asia/Kolkata';
+const nowS = () => Date.now()/1000;
+const dayKey = t => new Date(t*1000).toLocaleDateString('en-CA', {timeZone: TZ});
+const dayStart = key => Date.parse(key + 'T00:00:00+05:30')/1000;
+let DAY = dayKey(nowS());    // selected day YYYY-MM-DD
+let ALL = true;             // start showing everything; narrow to a day via the date controls
+function dayQuery(){ if(ALL) return ''; const f = dayStart(DAY); return `?from=${f}&to=${f+86400}`; }
+function renderDateBar(){
+  const today = dayKey(nowS());
+  $('dLabel').textContent = ALL ? 'All days'
+    : (DAY===today ? 'Today' : new Date(dayStart(DAY)*1000+43200e3).toLocaleDateString('en-GB',{timeZone:TZ,weekday:'short',day:'numeric',month:'short'}));
+  $('pNext').disabled = ALL || DAY >= today;
+  $('pPrev').disabled = ALL;
+  $('pAll').classList.toggle('on', ALL);
+  $('pAll').textContent = ALL ? 'Viewing all' : 'All days';
+}
+function setDay(key){ if(key > dayKey(nowS())) return; DAY = key; ALL = false; renderDateBar(); load(); }
+
 async function load(){
   $('loading').hidden = false; $('main').hidden = true; $('auth').hidden = true;
+  const qs = dayQuery();
   try {
-    const [people, unk] = await Promise.all([api.get('/detapi/people'), api.get('/detapi/unknowns')]);
+    const [people, unk] = await Promise.all([api.get('/detapi/people'+qs), api.get('/detapi/unknowns'+qs)]);
     PEOPLE = people;
     renderPeople(people); renderUnknowns(unk);
     $('loading').hidden = true; $('main').hidden = false;
@@ -191,6 +226,8 @@ async function load(){
 function renderPeople(people){
   $('pn').textContent = people.length ? people.length : '';
   $('people-empty').hidden = people.length > 0;
+  $('people-empty').textContent = ALL ? "No one tagged yet — name someone below and they'll appear here."
+    : 'No known people seen on this day.';
   $('people').innerHTML = people.map(p => `
     <button class="card" onclick="openDetail({id:${p.id},person:true})">
       ${p.sample ? `<img class="ph" src="${cropUrl(p.sample)}" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="ph"></span>`}
@@ -205,6 +242,8 @@ function renderUnknowns(unk){
   UNK = unk;
   $('un').textContent = unk.length ? unk.length : '';
   $('unknowns-empty').hidden = unk.length > 0;
+  $('unknowns-empty').textContent = ALL ? 'No un-identified detections right now.'
+    : 'No un-identified detections on this day.';
   $('selbtn').hidden = unk.length === 0;
   if (SEL) for (const id of [...SEL]) if (!unk.some(d => d.id === id)) SEL.delete(id);  // drop vanished groups
   $('unknowns').innerHTML = unk.map(d => `
@@ -383,6 +422,16 @@ $('selbtn').onclick = () => SEL ? exitSelect() : enterSelect();
 $('ab-cancel').onclick = exitSelect;
 $('ab-tag').onclick = () => { if (SEL && SEL.size) openMultiTag([...SEL]); };
 $('ab-rej').onclick = () => { if (SEL && SEL.size) dismissMany([...SEL]); };
+// date navigation
+$('pPrev').onclick = () => setDay(dayKey(dayStart(DAY) - 43200));
+$('pNext').onclick = () => setDay(dayKey(dayStart(DAY) + 129600));
+const openDatePick = () => { const d = $('pDate'); d.value = ALL ? dayKey(nowS()) : DAY; d.max = dayKey(nowS()); d.showPicker ? d.showPicker() : d.focus(); };
+$('pCal').onclick = openDatePick;
+$('pDate').onchange = e => { if (e.target.value) setDay(e.target.value); };
+$('pAll').onclick = () => { ALL = !ALL; renderDateBar(); load(); };
+$('dLabel').onclick = openDatePick;
+$('dLabel').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePick(); } };
+renderDateBar();
 load();
 </script>
 </body>

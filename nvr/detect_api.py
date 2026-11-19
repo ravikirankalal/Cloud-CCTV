@@ -84,17 +84,29 @@ def has_crop(det_id):
 
 
 # ---- queries ----
-def people():
+def people(frm=None, to=None):
+    """Known people. With a [frm,to) epoch range, only those seen in it, counts/sample scoped to it."""
+    ranged = frm is not None and to is not None
     def q(cur):
-        cur.execute("""SELECT i.id, i.name, COUNT(d.id), MIN(d.ts), MAX(d.ts)
-                       FROM identities i LEFT JOIN detections d ON d.identity_id = i.id
-                       WHERE i.kind = 'known'
-                       GROUP BY i.id, i.name ORDER BY LOWER(i.name)""")
+        if ranged:
+            cur.execute("""SELECT i.id, i.name, COUNT(d.id), MIN(d.ts), MAX(d.ts)
+                           FROM identities i JOIN detections d ON d.identity_id = i.id
+                           WHERE i.kind = 'known' AND d.ts >= :1 AND d.ts < :2
+                           GROUP BY i.id, i.name ORDER BY LOWER(i.name)""", [frm, to])
+        else:
+            cur.execute("""SELECT i.id, i.name, COUNT(d.id), MIN(d.ts), MAX(d.ts)
+                           FROM identities i LEFT JOIN detections d ON d.identity_id = i.id
+                           WHERE i.kind = 'known'
+                           GROUP BY i.id, i.name ORDER BY LOWER(i.name)""")
         return cur.fetchall()
 
     def pick_sample(cur, ident_id):
-        cur.execute("""SELECT id FROM detections WHERE identity_id = :1
-                       ORDER BY confirmed DESC, id DESC FETCH FIRST 12 ROWS ONLY""", [ident_id])
+        if ranged:
+            cur.execute("""SELECT id FROM detections WHERE identity_id = :1 AND ts >= :2 AND ts < :3
+                           ORDER BY confirmed DESC, id DESC FETCH FIRST 12 ROWS ONLY""", [ident_id, frm, to])
+        else:
+            cur.execute("""SELECT id FROM detections WHERE identity_id = :1
+                           ORDER BY confirmed DESC, id DESC FETCH FIRST 12 ROWS ONLY""", [ident_id])
         for (did,) in cur.fetchall():
             if has_crop(int(did)):
                 return int(did)
@@ -158,13 +170,18 @@ def rename(ident_id, name):
     return db(w, write=True)
 
 
-def unknowns(limit):
+def unknowns(limit, frm=None, to=None):
     """Unknown detections GROUPED by duplicate-cluster: one tile per person. Each entry's `id` is the
     representative (best-scoring crop) and `count` is how many detections the group holds. Tagging
-    that id names the whole group (detect_service assigned the cluster_id)."""
+    that id names the whole group (detect_service assigned the cluster_id). With a [frm,to) epoch range,
+    only crops seen in it (so a group's shown count is its sightings that day)."""
     def q(cur):
-        cur.execute("""SELECT id, ts, score, NVL(cluster_id, id) grp FROM detections
-                       WHERE identity_id IS NULL ORDER BY ts DESC""")
+        if frm is not None and to is not None:
+            cur.execute("""SELECT id, ts, score, NVL(cluster_id, id) grp FROM detections
+                           WHERE identity_id IS NULL AND ts >= :1 AND ts < :2 ORDER BY ts DESC""", [frm, to])
+        else:
+            cur.execute("""SELECT id, ts, score, NVL(cluster_id, id) grp FROM detections
+                           WHERE identity_id IS NULL ORDER BY ts DESC""")
         return cur.fetchall()
     groups = {}
     for did, ts, score, grp in db(q):
@@ -180,6 +197,16 @@ def unknowns(limit):
         g["ts"] = max(g["ts"], ts)              # ts = most recent sighting; first = earliest
         g["first"] = min(g["first"], ts)
     return sorted(groups.values(), key=lambda x: x["ts"], reverse=True)[:limit]
+
+
+def _range(q):
+    """Optional [from, to) epoch window from the query string, else (None, None) for all-time."""
+    try:
+        if "from" in q and "to" in q:
+            return float(q["from"][0]), float(q["to"][0])
+    except (ValueError, KeyError):
+        pass
+    return None, None
 
 
 def _ids(b):
@@ -236,10 +263,12 @@ class H(BaseHTTPRequestHandler):
         q = parse_qs(u.query)
         try:
             if u.path == "/detapi/people":
-                return self.send(200, json.dumps(people()))
+                frm, to = _range(q)
+                return self.send(200, json.dumps(people(frm, to)))
             if u.path == "/detapi/unknowns":
                 lim = min(int(q.get("limit", [UNKNOWN_LIMIT])[0]), UNKNOWN_LIMIT)
-                return self.send(200, json.dumps(unknowns(lim)))
+                frm, to = _range(q)
+                return self.send(200, json.dumps(unknowns(lim, frm, to)))
             if u.path == "/detapi/person":
                 return self.send(200, json.dumps(person(int(q["id"][0]))))
             if u.path == "/detapi/group":
