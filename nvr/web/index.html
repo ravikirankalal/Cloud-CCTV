@@ -705,12 +705,22 @@ $('camName').addEventListener('click', () => {
 $('dbgOff').onclick = () => setDebug(false);
 
 /* start (after sign-in) */
-window.startApp = () => {
+window.startApp = async () => {
   $('app').hidden = false;
   if (!(window.Hls && Hls.isSupported()) && !canHevcMse && !video.canPlayType('application/vnd.apple.mpegurl'))
     message("<b>This browser can't play the HD video</b>It's H.265: use Safari, or Chrome / Edge on a device with H.265 hardware decoding.");
   setDebug(debug);
-  loadSpans(); health(); goLive();
+  health();
+  // deep-link: /?t=<epoch> (e.g. from a People sighting) opens that moment's recording instead of live
+  let jumpT = null;
+  try { const v = +new URLSearchParams(location.search).get('t'); if (v > 0) jumpT = v; } catch {}
+  if (jumpT && jumpT <= now() - 20) {
+    st.day = dayKey(jumpT); st.center = jumpT;
+    await loadSpans();                 // playAt needs st.spans for the target day
+    playAt(jumpT);
+  } else {
+    loadSpans(); goLive();
+  }
 };
 </script>
 <script type="module">

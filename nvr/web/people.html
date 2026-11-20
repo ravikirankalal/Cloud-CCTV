@@ -80,6 +80,11 @@ body.selecting .thumb .chk{display:inline-flex}
 .actionbar .cancel{color:var(--muted);background:transparent;border-color:transparent}
 .actionbar button:disabled{opacity:.4;pointer-events:none}
 .psheet .crops{max-height:48vh;overflow:auto;margin:12px 0 4px;clear:both}
+.thumb .play{position:absolute;right:5px;top:5px;width:24px;height:24px;border-radius:50%;z-index:2;
+  background:rgba(8,11,15,.6);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.22);
+  color:#fff;font-size:11px;display:none;align-items:center;justify-content:center;cursor:pointer;padding-left:2px}
+.psheet .thumb .play{display:inline-flex}
+.thumb .play:hover{background:var(--rec,#e0245e)}
 .psheet .thumb .chk{display:none}
 .psheet .thumb.sel{outline-color:var(--warn)}
 .psheet .thumb.sel .chk{display:inline-flex;background:var(--warn);border-color:var(--warn)}
@@ -378,10 +383,16 @@ async function openDetail(o){
       <button type="button" class="thumb${RM.has(d.id)?' sel':''}" data-id="${d.id}">
         <img src="${cropUrl(d.id)}" loading="lazy">
         <span class="chk">✕</span>
+        <span class="play" data-t="${Math.floor(d.ts)}" role="link" title="Watch the recording at this moment">▶</span>
         <span class="sc mono">${tileWhen(d.ts)}</span>
       </button>`).join('') : '<div class="empty">No images.</div>';
     g.querySelectorAll('.thumb').forEach(b => {
       const img = b.querySelector('img'); if(img) hideBroken(img);
+      const play = b.querySelector('.play');
+      if(play) play.addEventListener('click', e => {         // jump to the recorded footage; don't toggle remove
+        e.stopPropagation();
+        window.open('/?t=' + play.dataset.t, '_blank', 'noopener');
+      });
       b.addEventListener('click', () => {
         const id = parseInt(b.dataset.id);
         RM.has(id) ? RM.delete(id) : RM.add(id);
