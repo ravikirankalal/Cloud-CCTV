@@ -17,7 +17,8 @@ import oracledb
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("NVR_DATA", "/home/ubuntu/nvr-data")
 STREAM = os.environ.get("NVR_STREAM", "cam1")
-STRIDE = int(os.environ.get("DET_STRIDE", "2"))          # sample every Nth segment (1 frame each)
+STRIDE = int(os.environ.get("DET_STRIDE", "2"))          # sample every Nth segment
+FRAMES = int(os.environ.get("DET_FRAMES", "1"))          # frames sampled per segment (evenly spaced)
 BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop before committing/sleeping
 IDLE = int(os.environ.get("DET_IDLE", "15"))             # sleep seconds when caught up
 RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnecting to Oracle after a DB error
@@ -86,25 +87,32 @@ def process_segment(nvr, cur, seg_id, gate=None):
 
     The optional `gate` is a MotionGate: it is fed EVERY decoded frame in order (to keep its background
     model current) and, on a frame with no foreground blob, we skip the ~0.9 s YOLOX+re-ID pass entirely.
-    Decode is codec-bound and happens either way; the gate's saving is the skipped YOLOX on empty frames."""
-    row = nvr.execute("SELECT start, path, init FROM segments WHERE id = ?", (seg_id,)).fetchone()
+    Decode is codec-bound and happens either way; the gate's saving is the skipped YOLOX on empty frames.
+
+    With DET_FRAMES>1 we sample that many frames evenly across the segment (single ffmpeg pass; see
+    detect.decode_frames). Each detection's ts is the frame's own wall-clock time (start + i·dur/FRAMES),
+    so a sighting still navigates to the exact moment in the recording."""
+    row = nvr.execute("SELECT start, path, init, dur FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
         return 0
-    start, path, init = row
-    frame = detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path))
-    if gate is not None and not gate.check(frame)[0]:
-        return 0                                          # empty scene: don't pay for YOLOX
-    dets = detect.detect_embed(frame)
-    for d in dets:
-        emb = array.array("f", d["embedding"])
-        ident = match_known(cur, emb)
-        idv = cur.var(oracledb.NUMBER)
-        cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id)
-                       VALUES (:1, :2, :3, :4, :5, :6) RETURNING id INTO :7""",
-                    (float(start), seg_id, ",".join(str(int(v)) for v in d["box"]),
-                     float(d["score"]), emb, ident, idv))
-        _save_crop(frame, d["box"], int(idv.getvalue()[0]))
-    return len(dets)
+    start, path, init, dur = row
+    frames = detect.decode_frames(os.path.join(DATA, init), os.path.join(DATA, path), FRAMES, dur)
+    stored = 0
+    for i, frame in enumerate(frames):
+        if gate is not None and not gate.check(frame)[0]:
+            continue                                      # empty scene: don't pay for YOLOX
+        ts = float(start) + (i * float(dur) / FRAMES if dur and FRAMES > 1 else 0.0)
+        for d in detect.detect_embed(frame):
+            emb = array.array("f", d["embedding"])
+            ident = match_known(cur, emb)
+            idv = cur.var(oracledb.NUMBER)
+            cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id)
+                           VALUES (:1, :2, :3, :4, :5, :6) RETURNING id INTO :7""",
+                        (ts, seg_id, ",".join(str(int(v)) for v in d["box"]),
+                         float(d["score"]), emb, ident, idv))
+            _save_crop(frame, d["box"], int(idv.getvalue()[0]))
+            stored += 1
+    return stored
 
 
 def _cluster(cur):
