@@ -9,7 +9,8 @@ User=ubuntu
 WorkingDirectory=/home/ubuntu/nvr
 Environment=NVR_DATA=/home/ubuntu/nvr-data
 Environment=NVR_DET_CONF=0.25
-Environment=DET_STRIDE=2
+Environment=DET_STRIDE=1
+Environment=DET_FRAMES=2
 ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_service.py run
 Restart=always
 RestartSec=10

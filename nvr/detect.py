@@ -80,6 +80,29 @@ def decode_frame(init, seg, ss=None):
     return np.frombuffer(out[:need], np.uint8).reshape(h, w, 3)
 
 
+def decode_frames(init, seg, n=1, dur=None):
+    """Up to `n` RGB frames evenly spaced across the segment, decoded in ONE ffmpeg pass. These segments
+    are single-GOP (one keyframe at the very start), so a frame at time t costs decoding every P-frame up
+    to t; seeking per frame would re-decode overlapping ranges. Instead we decode once and let the `fps`
+    filter emit frames at 0, dur/n, 2·dur/n, …, so the pass only runs to ~(n-1)/n of the segment. Across
+    consecutive segments that yields uniform ~dur/n sampling. n<=1 (or unknown dur) uses the cheap
+    first-frame-only path. Returns a list of HxWx3 arrays (fewer than n only if the segment is short)."""
+    w, h = _frame_dims(init)
+    need = w * h * 3
+    with open(init, "rb") as f1, open(seg, "rb") as f2:
+        data = f1.read() + f2.read()
+    if n <= 1 or not dur or dur <= 0:
+        return [decode_frame(init, seg)]
+    interval = max(float(dur) / n, 0.1)
+    cmd = ["ffmpeg", "-v", "error", "-i", "pipe:0", "-vf", f"fps=1/{interval:.3f}",
+           "-frames:v", str(int(n)), "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1"]
+    out = subprocess.run(cmd, input=data, capture_output=True).stdout
+    k = len(out) // need
+    if k == 0:
+        raise RuntimeError(f"frame decode failed ({len(out)}/{need} bytes from ffmpeg)")
+    return [np.frombuffer(out[i * need:(i + 1) * need], np.uint8).reshape(h, w, 3) for i in range(k)]
+
+
 def _letterbox(frame_rgb, size=YOLOX_SIZE):
     """Resize-and-pad to size*size (image top-left, pad bottom-right). Returns (RGB canvas, ratio),
     where ratio maps letterbox px -> original px (orig = px / ratio)."""
