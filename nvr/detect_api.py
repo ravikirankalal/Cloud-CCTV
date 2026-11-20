@@ -122,14 +122,21 @@ def people(frm=None, to=None):
     return out
 
 
-def person(ident_id):
-    """Every crop currently on one identity, newest first, confirmed ground truth ahead of re-matched.
-    Backs the person detail view where the user prunes wrong crops."""
+def person(ident_id, frm=None, to=None):
+    """One identity's crops, newest first, confirmed ground truth ahead of re-matched. Backs the person
+    detail view where the user prunes wrong crops. With a [frm,to) epoch range, only that day's crops
+    (the detail matches the day-scoped grid it was opened from)."""
+    ranged = frm is not None and to is not None
     def q(cur):
         cur.execute("SELECT name FROM identities WHERE id = :1", [ident_id])
         nm = cur.fetchone()
-        cur.execute("""SELECT id, ts, score FROM detections WHERE identity_id = :1
-                       ORDER BY confirmed DESC, ts DESC FETCH FIRST 500 ROWS ONLY""", [ident_id])
+        if ranged:
+            cur.execute("""SELECT id, ts, score FROM detections WHERE identity_id = :1
+                           AND ts >= :2 AND ts < :3
+                           ORDER BY confirmed DESC, ts DESC FETCH FIRST 500 ROWS ONLY""", [ident_id, frm, to])
+        else:
+            cur.execute("""SELECT id, ts, score FROM detections WHERE identity_id = :1
+                           ORDER BY confirmed DESC, ts DESC FETCH FIRST 500 ROWS ONLY""", [ident_id])
         return (nm[0] if nm else None), cur.fetchall()
     name, rows = db(q)
     dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
@@ -137,16 +144,23 @@ def person(ident_id):
     return {"name": name, "detections": dets}
 
 
-def group(rep_id):
+def group(rep_id, frm=None, to=None):
     """Every unknown crop in one duplicate-group (the cluster the given representative belongs to).
-    Mirrors person() so the UI can open an unknown group the same way it opens a tagged person."""
+    Mirrors person() so the UI can open an unknown group the same way it opens a tagged person. With a
+    [frm,to) epoch range, only that day's crops (matches the day-scoped grid)."""
+    ranged = frm is not None and to is not None
     def q(cur):
         cur.execute("SELECT NVL(cluster_id, id) FROM detections WHERE id = :1", [rep_id])
         r = cur.fetchone()
         grp = int(r[0]) if r else int(rep_id)
-        cur.execute("""SELECT id, ts, score FROM detections
-                       WHERE identity_id IS NULL AND NVL(cluster_id, id) = :1
-                       ORDER BY score DESC FETCH FIRST 500 ROWS ONLY""", [grp])
+        if ranged:
+            cur.execute("""SELECT id, ts, score FROM detections
+                           WHERE identity_id IS NULL AND NVL(cluster_id, id) = :1 AND ts >= :2 AND ts < :3
+                           ORDER BY score DESC FETCH FIRST 500 ROWS ONLY""", [grp, frm, to])
+        else:
+            cur.execute("""SELECT id, ts, score FROM detections
+                           WHERE identity_id IS NULL AND NVL(cluster_id, id) = :1
+                           ORDER BY score DESC FETCH FIRST 500 ROWS ONLY""", [grp])
         return grp, cur.fetchall()
     grp, rows = db(q)
     dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
@@ -276,9 +290,11 @@ class H(BaseHTTPRequestHandler):
                 frm, to = _range(q)
                 return self.send(200, json.dumps(unknowns(lim, frm, to)))
             if u.path == "/detapi/person":
-                return self.send(200, json.dumps(person(int(q["id"][0]))))
+                frm, to = _range(q)
+                return self.send(200, json.dumps(person(int(q["id"][0]), frm, to)))
             if u.path == "/detapi/group":
-                return self.send(200, json.dumps(group(int(q["id"][0]))))
+                frm, to = _range(q)
+                return self.send(200, json.dumps(group(int(q["id"][0]), frm, to)))
             if u.path.startswith("/detapi/crop/") and u.path.endswith(".jpg"):
                 det_id = int(u.path[len("/detapi/crop/"):-4])
                 p = crop_file(det_id)
