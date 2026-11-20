@@ -760,14 +760,22 @@ onAuthStateChanged(auth, async user => {
   else acct.textContent = (user.displayName || user.email || '?')[0].toUpperCase();
   if (!started) { started = true; window.startApp(); }
 }, () => { card.hidden = false; err.textContent = 'Could not check the sign-in. Reload to try again.'; });
+const isMobile = /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle|Opera Mini/i.test(navigator.userAgent)
+  || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches);
+const authErr = e => e.code === 'auth/unauthorized-domain' ? "This address isn't allowed for Google sign-in yet." : 'Sign-in failed. Try again.';
 $('gSignIn').onclick = async () => {
   err.textContent = ''; $('gSignIn').disabled = true;
   const p = new GoogleAuthProvider();
+  if (isMobile) {                                  // phones: full-page native Google sign-in, not a desktop-width popup
+    try { await signInWithRedirect(auth, p); }     // navigates away; onAuthStateChanged resumes the app on return
+    catch (e) { err.textContent = authErr(e); $('gSignIn').disabled = false; }
+    return;
+  }
   try { await signInWithPopup(auth, p); }
   catch (e) {
     if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') { try { await signInWithRedirect(auth, p); return; } catch (e2) { e = e2; } }
     if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request')
-      err.textContent = e.code === 'auth/unauthorized-domain' ? "This address isn't allowed for Google sign-in yet." : 'Sign-in failed. Try again.';
+      err.textContent = authErr(e);
   }
   $('gSignIn').disabled = false;
 };
