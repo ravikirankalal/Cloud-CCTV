@@ -760,23 +760,20 @@ onAuthStateChanged(auth, async user => {
   else acct.textContent = (user.displayName || user.email || '?')[0].toUpperCase();
   if (!started) { started = true; window.startApp(); }
 }, () => { card.hidden = false; err.textContent = 'Could not check the sign-in. Reload to try again.'; });
-const isMobile = /Android|iPhone|iPad|iPod|Mobile|Silk|Kindle|Opera Mini/i.test(navigator.userAgent)
-  || (window.matchMedia && window.matchMedia('(pointer: coarse)').matches)
-  || Math.min(window.innerWidth, window.screen && window.screen.width || 9999) < 820;  // narrow screen even under "Request desktop site"
-const authErr = e => e.code === 'auth/unauthorized-domain' ? "This address isn't allowed for Google sign-in yet." : 'Sign-in failed. Try again.';
+// Google sign-in is POPUP, not redirect: authDomain (localbc-41b52.firebaseapp.com) differs from the app's
+// domain (guttedar.duckdns.org), and browsers block the cross-domain storage signInWithRedirect needs to
+// complete — the redirect lands back here with no session and bounces to login. Popup keeps the whole flow
+// in this origin, so the session sticks. (If the Google page looks desktop-width on a phone, that's the
+// browser's "Desktop site" setting, not something the app can override.)
 $('gSignIn').onclick = async () => {
   err.textContent = ''; $('gSignIn').disabled = true;
   const p = new GoogleAuthProvider();
-  if (isMobile) {                                  // phones: full-page native Google sign-in, not a desktop-width popup
-    try { await signInWithRedirect(auth, p); }     // navigates away; onAuthStateChanged resumes the app on return
-    catch (e) { err.textContent = authErr(e); $('gSignIn').disabled = false; }
-    return;
-  }
   try { await signInWithPopup(auth, p); }
   catch (e) {
-    if (e.code === 'auth/popup-blocked' || e.code === 'auth/operation-not-supported-in-this-environment') { try { await signInWithRedirect(auth, p); return; } catch (e2) { e = e2; } }
     if (e.code !== 'auth/popup-closed-by-user' && e.code !== 'auth/cancelled-popup-request')
-      err.textContent = authErr(e);
+      err.textContent = e.code === 'auth/unauthorized-domain' ? "This address isn't allowed for Google sign-in yet."
+        : e.code === 'auth/popup-blocked' ? 'Allow pop-ups for this site, then tap Sign in again.'
+        : 'Sign-in failed. Try again.';
   }
   $('gSignIn').disabled = false;
 };
