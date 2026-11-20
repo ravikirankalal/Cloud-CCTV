@@ -15,6 +15,10 @@ import adb
 DEFAULT_THR = float(os.environ.get("DET_MATCH", "0.28"))   # cosine distance < this => same person
 PROTO_K = int(os.environ.get("DET_PROTO_K", "16"))         # prototype centroids per known person (gallery size)
 APPROX_K = int(os.environ.get("DET_APPROX_K", "1000"))     # per-proto candidate fan-out for the vector index
+SUPPRESS_THR = float(os.environ.get("DET_SUPPRESS", "0.22"))  # TIGHTER cosine gate for auto-hiding a match to
+#   the reserved 'not a person' gallery. Deliberately well below DET_MATCH: a dismissed static false positive
+#   (a bucket, a bag) re-detects near-identically, so its members sit ~0.1 from their hidden prototype, while a
+#   real person sits >0.3 from that junk — so this suppresses the recurring false positive but never a person.
 
 
 # ---- prototype gallery: a few spherical-k-means centroids per known person, kept in person_protos.
@@ -42,13 +46,14 @@ def _skmeans(E, K, iters=15):
 
 
 def rebuild_protos(cur, identity_id=None):
-    """Recompute prototype centroids for one known identity (or all). Replaces that identity's rows in
-    person_protos. Cheap: a person has at most a few hundred confirmed crops."""
+    """Recompute prototype centroids for one identity (or all known + hidden). Replaces that identity's
+    rows in person_protos. Cheap: an identity has at most a few hundred confirmed crops. The hidden
+    'not a person' identity is included so its prototypes drive auto-suppression (see nearest_proto)."""
     import numpy as np, array
     if identity_id is not None:
         idents = [int(identity_id)]
     else:
-        cur.execute("SELECT id FROM identities WHERE kind = 'known'")
+        cur.execute("SELECT id FROM identities WHERE kind IN ('known', 'hidden')")
         idents = [int(r[0]) for r in cur.fetchall()]
     for iid in idents:
         cur.execute("SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1", [iid])
@@ -62,13 +67,22 @@ def rebuild_protos(cur, identity_id=None):
                         [(iid, array.array("f", p.tolist())) for p in P])
 
 
-def nearest_proto(cur, emb, thr=DEFAULT_THR):
-    """Nearest known prototype to an embedding -> its identity_id, or None if none within `thr`.
-    The live match for each new detection (bounded gallery = the prototype set)."""
-    cur.execute("""SELECT identity_id, VECTOR_DISTANCE(embedding, :e, COSINE) d
-                   FROM person_protos ORDER BY d FETCH FIRST 1 ROWS ONLY""", {"e": emb})
+def nearest_proto(cur, emb, thr=DEFAULT_THR, suppress_thr=SUPPRESS_THR):
+    """Nearest prototype to an embedding -> its identity_id, or None. The live match for each new
+    detection. Known people match within `thr`; failing that, the reserved hidden ('not a person')
+    gallery matches within a TIGHTER `suppress_thr` — so a learned false positive is auto-suppressed,
+    but a real person (always well outside suppress_thr of junk) is never hidden. Known wins ties."""
+    cur.execute("""SELECT p.identity_id, VECTOR_DISTANCE(p.embedding, :e, COSINE) d
+                   FROM person_protos p JOIN identities i ON i.id = p.identity_id
+                   WHERE i.kind = 'known' ORDER BY d FETCH FIRST 1 ROWS ONLY""", {"e": emb})
     r = cur.fetchone()
-    return int(r[0]) if r and r[1] is not None and r[1] < thr else None
+    if r and r[1] is not None and r[1] < thr:
+        return int(r[0])
+    cur.execute("""SELECT p.identity_id, VECTOR_DISTANCE(p.embedding, :e, COSINE) d
+                   FROM person_protos p JOIN identities i ON i.id = p.identity_id
+                   WHERE i.kind = 'hidden' ORDER BY d FETCH FIRST 1 ROWS ONLY""", {"e": emb})
+    r = cur.fetchone()
+    return int(r[0]) if r and r[1] is not None and r[1] < suppress_thr else None
 
 
 def get_or_create_identity(cur, name):
@@ -187,36 +201,41 @@ def dismiss_cluster(cur, detection_id):
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'dismiss')", [detection_id])
 
 
-def rematch(cur, thr=DEFAULT_THR):
-    """(Re)assign every UNCONFIRMED detection to the nearest known PROTOTYPE within `thr`, nulling those
-    that match none. Returns the number of rows (re)assigned. Confirmed rows are untouched.
+def rematch(cur, thr=DEFAULT_THR, suppress_thr=SUPPRESS_THR):
+    """(Re)assign every UNCONFIRMED detection to the nearest matching PROTOTYPE, nulling those that match
+    none. Known people match within `thr`; the hidden 'not a person' gallery auto-suppresses within the
+    tighter `suppress_thr`, and only where no known person matched (known wins). Returns rows (re)assigned.
+    Confirmed rows are untouched.
 
-    Prototype-driven over the IVF vector index: for each of the (few) known prototypes we ask the index
-    for its nearest UNCONFIRMED detections, then resolve each detection to its closest prototype's
-    identity in python. That is O(prototypes · log N) instead of the old O(unconfirmed · gallery) full
-    scan, and matches only kind='known' prototypes (person_protos never holds the hidden identity), so a
-    dismissed junk cluster is never propagated onto or used to auto-hide a real person."""
+    Prototype-driven over the IVF vector index: for each of the (few) prototypes we ask the index for its
+    nearest UNCONFIRMED detections, then resolve each detection in python — O(prototypes · log N) instead
+    of the old O(unconfirmed · gallery) full scan."""
     import array, numpy as np
     cur.execute("UPDATE detections SET identity_id = NULL WHERE confirmed = 0")   # clear stale auto-labels
-    cur.execute("SELECT identity_id, embedding FROM person_protos")
+    cur.execute("""SELECT p.identity_id, i.kind, p.embedding FROM person_protos p
+                   JOIN identities i ON i.id = p.identity_id""")
     protos = cur.fetchall()
-    best = {}                                             # det_id -> (distance, identity) nearest-proto-wins
-    for iid, emb in protos:
+    known, hidden = {}, {}                                # det_id -> (distance, identity), nearest-proto-wins
+    for iid, kind, emb in protos:
         e = array.array("f", np.asarray(emb, np.float32).tolist())
+        lim = thr if kind == "known" else suppress_thr
+        tgt = known if kind == "known" else hidden
         cur.execute(f"""SELECT id, VECTOR_DISTANCE(embedding, :e, COSINE) d
                         FROM detections WHERE confirmed = 0
                         ORDER BY VECTOR_DISTANCE(embedding, :e, COSINE)
                         FETCH APPROX FIRST {APPROX_K} ROWS ONLY""", {"e": e})
         for did, d in cur.fetchall():
-            if d is None or d >= thr:
+            if d is None or d >= lim:
                 continue                                  # exact distance re-check on the candidates
             did = int(did)
-            if did not in best or d < best[did][0]:
-                best[did] = (d, int(iid))
-    if best:
+            if did not in tgt or d < tgt[did][0]:
+                tgt[did] = (d, int(iid))
+    final = {did: iid for did, (d, iid) in hidden.items()}      # hidden suppression where no person matches
+    final.update({did: iid for did, (d, iid) in known.items()}) # a known person always overrides
+    if final:
         cur.executemany("UPDATE detections SET identity_id = :1 WHERE id = :2 AND confirmed = 0",
-                        [(iid, did) for did, (d, iid) in best.items()])
-    return len(best)
+                        [(iid, did) for did, iid in final.items()])
+    return len(final)
 
 
 def summary(cur):
