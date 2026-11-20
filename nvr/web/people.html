@@ -362,7 +362,7 @@ async function openDetail(o){
   if (!isP) setTimeout(() => $('nm').focus(), 50);
 
   let data;
-  try{ data = await api.get((isP ? '/detapi/person?id=' : '/detapi/group?id=') + o.id); }
+  try{ data = await api.get((isP ? '/detapi/person?id=' : '/detapi/group?id=') + o.id + dayQuery().replace('?','&')); }
   catch(e){ $('pcrops').innerHTML = `<div class="empty">${e==='auth'?'Sign in first':'Could not load images'}</div>`; return; }
   const dets = data.detections || [];
   const RM = new Set();
