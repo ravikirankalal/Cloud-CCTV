@@ -145,7 +145,6 @@ body.selecting .thumb .chk{display:inline-flex}
       <div class="dlabel" id="dLabel" role="button" tabindex="0" title="Pick a date">Today</div>
       <button class="icon" id="pNext" aria-label="Next day">›</button>
       <button class="icon" id="pCal" aria-label="Pick a date">📅</button>
-      <button class="ghost" id="pAll">All days</button>
       <input type="date" id="pDate" aria-hidden="true" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0">
     </div>
     <h2>People <span class="n" id="pn"></span></h2>
@@ -173,7 +172,8 @@ const api = {
   async get(p){ const r = await fetch(p, {cache:'no-store'}); if(r.status===401||r.status===403) throw 'auth'; if(!r.ok) throw new Error(await r.text()); return r.json(); },
   async post(p,b){ const r = await fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}); if(r.status===401||r.status===403) throw 'auth'; if(!r.ok) throw new Error(await r.text()); return r.json(); }
 };
-let PEOPLE = [];
+let PEOPLE = [];         // people seen on the selected day (the grid)
+let ALLPEOPLE = [];      // every known person (tag suggestion chips, independent of the day)
 
 function toast(msg, bad){ const t=$('toast'); t.textContent=msg; t.className='toast show'+(bad?' bad':''); clearTimeout(t._t); t._t=setTimeout(()=>t.className='toast',2200); }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
@@ -195,31 +195,29 @@ function relWhen(ts){
   const d=Math.floor(s/86400); return d<30 ? d+'d ago' : _dt(ts).toLocaleDateString([], {day:'2-digit', month:'short'});
 }
 
-// ---- date awareness: the People + Unknown lists scope to one IST day, or All ----
+// ---- date awareness: the People + Unknown lists scope to one IST day ----
 const TZ = 'Asia/Kolkata';
 const nowS = () => Date.now()/1000;
 const dayKey = t => new Date(t*1000).toLocaleDateString('en-CA', {timeZone: TZ});
 const dayStart = key => Date.parse(key + 'T00:00:00+05:30')/1000;
 let DAY = dayKey(nowS());    // selected day YYYY-MM-DD
-let ALL = true;             // start showing everything; narrow to a day via the date controls
-function dayQuery(){ if(ALL) return ''; const f = dayStart(DAY); return `?from=${f}&to=${f+86400}`; }
+function dayQuery(){ const f = dayStart(DAY); return `?from=${f}&to=${f+86400}`; }
 function renderDateBar(){
   const today = dayKey(nowS());
-  $('dLabel').textContent = ALL ? 'All days'
-    : (DAY===today ? 'Today' : new Date(dayStart(DAY)*1000+43200e3).toLocaleDateString('en-GB',{timeZone:TZ,weekday:'short',day:'numeric',month:'short'}));
-  $('pNext').disabled = ALL || DAY >= today;
-  $('pPrev').disabled = ALL;
-  $('pAll').classList.toggle('on', ALL);
-  $('pAll').textContent = ALL ? 'Viewing all' : 'All days';
+  $('dLabel').textContent = DAY===today ? 'Today'
+    : new Date(dayStart(DAY)*1000+43200e3).toLocaleDateString('en-GB',{timeZone:TZ,weekday:'short',day:'numeric',month:'short'});
+  $('pNext').disabled = DAY >= today;
 }
-function setDay(key){ if(key > dayKey(nowS())) return; DAY = key; ALL = false; renderDateBar(); load(); }
+function setDay(key){ if(key > dayKey(nowS())) return; DAY = key; renderDateBar(); load(); }
 
 async function load(){
   $('loading').hidden = false; $('main').hidden = true; $('auth').hidden = true;
   const qs = dayQuery();
   try {
-    const [people, unk] = await Promise.all([api.get('/detapi/people'+qs), api.get('/detapi/unknowns'+qs)]);
-    PEOPLE = people;
+    const [people, unk, allp] = await Promise.all([
+      api.get('/detapi/people'+qs), api.get('/detapi/unknowns'+qs),
+      api.get('/detapi/people')]);          // full known set: tag suggestions aren't limited to this day
+    PEOPLE = people; ALLPEOPLE = allp;
     renderPeople(people); renderUnknowns(unk);
     $('loading').hidden = true; $('main').hidden = false;
   } catch (e) {
@@ -231,8 +229,7 @@ async function load(){
 function renderPeople(people){
   $('pn').textContent = people.length ? people.length : '';
   $('people-empty').hidden = people.length > 0;
-  $('people-empty').textContent = ALL ? "No one tagged yet — name someone below and they'll appear here."
-    : 'No known people seen on this day.';
+  $('people-empty').textContent = 'No known people seen on this day.';
   $('people').innerHTML = people.map(p => `
     <button class="card" onclick="openDetail({id:${p.id},person:true})">
       ${p.sample ? `<img class="ph" src="${cropUrl(p.sample)}" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="ph"></span>`}
@@ -247,8 +244,7 @@ function renderUnknowns(unk){
   UNK = unk;
   $('un').textContent = unk.length ? unk.length : '';
   $('unknowns-empty').hidden = unk.length > 0;
-  $('unknowns-empty').textContent = ALL ? 'No un-identified detections right now.'
-    : 'No un-identified detections on this day.';
+  $('unknowns-empty').textContent = 'No un-identified detections on this day.';
   $('selbtn').hidden = unk.length === 0;
   if (SEL) for (const id of [...SEL]) if (!unk.some(d => d.id === id)) SEL.delete(id);  // drop vanished groups
   $('unknowns').innerHTML = unk.map(d => `
@@ -294,7 +290,7 @@ function selTotal(ids){ return UNK.filter(d => ids.includes(d.id)).reduce((s, d)
 
 function openMultiTag(ids){
   const g = ids.length, total = selTotal(ids);
-  const chips = PEOPLE.map(p => `<button type="button" class="chip" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join('');
+  const chips = ALLPEOPLE.map(p => `<button type="button" class="chip" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join('');
   $('sheet-host').innerHTML = `
     <div class="scrim" onclick="if(event.target===this)closeSheet()">
       <div class="sheet" role="dialog" aria-label="Name these people">
@@ -339,9 +335,9 @@ function closeSheet(){ $('sheet-host').innerHTML=''; if(DIRTY){ DIRTY=false; loa
 // same-name person). `o` = {id, person?}  (id = a group member for unknowns, the identity id for a person).
 async function openDetail(o){
   const isP = !!o.person;
-  const self = isP ? PEOPLE.find(x => x.id === o.id) : null;
+  const self = isP ? ALLPEOPLE.find(x => x.id === o.id) : null;
   const curName = self ? self.name : '';
-  const chips = PEOPLE.filter(p => !isP || p.id !== o.id)
+  const chips = ALLPEOPLE.filter(p => !isP || p.id !== o.id)
     .map(p => `<button type="button" class="chip" data-name="${esc(p.name)}">${esc(p.name)}</button>`).join('');
   $('sheet-host').innerHTML = `
     <div class="scrim" onclick="if(event.target===this)closeSheet()">
@@ -436,10 +432,9 @@ $('ab-rej').onclick = () => { if (SEL && SEL.size) dismissMany([...SEL]); };
 // date navigation
 $('pPrev').onclick = () => setDay(dayKey(dayStart(DAY) - 43200));
 $('pNext').onclick = () => setDay(dayKey(dayStart(DAY) + 129600));
-const openDatePick = () => { const d = $('pDate'); d.value = ALL ? dayKey(nowS()) : DAY; d.max = dayKey(nowS()); d.showPicker ? d.showPicker() : d.focus(); };
+const openDatePick = () => { const d = $('pDate'); d.value = DAY; d.max = dayKey(nowS()); d.showPicker ? d.showPicker() : d.focus(); };
 $('pCal').onclick = openDatePick;
 $('pDate').onchange = e => { if (e.target.value) setDay(e.target.value); };
-$('pAll').onclick = () => { ALL = !ALL; renderDateBar(); load(); };
 $('dLabel').onclick = openDatePick;
 $('dLabel').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePick(); } };
 renderDateBar();
