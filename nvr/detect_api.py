@@ -233,6 +233,8 @@ def reject(det_ids):
     def w(cur):
         for did in det_ids:
             match.dismiss_cluster(cur, did)
+        match.rebuild_protos(cur)                 # refresh the 'not a person' gallery
+        match.rematch(cur)                        # auto-suppress other detections matching the dismissed junk
         return {"ok": True, "count": len(det_ids)}
     return db(w, write=True)
 
