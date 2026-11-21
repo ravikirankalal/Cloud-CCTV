@@ -20,6 +20,7 @@ or the source restarted, so a player always knows the wall-clock time it's showi
 import json
 import math
 import os
+import re
 import shutil
 import sqlite3
 import subprocess
@@ -41,6 +42,71 @@ CARD_RUN = 10 ** 11        # gapfill.py's run ids are epoch ms: above this = fro
 MAX_SEG = 60              # no segment is longer: lets time-range queries use the index both ways
 MAX_VOD = 24 * 3600        # longest playlist
 MAX_EXPORT = 3600          # longest export
+
+# ---- background jobs dashboard (/api/jobs) ----------------------------------
+# Fixed allowlist of the systemd units that make up the NVR; the /api/jobs endpoints
+# only ever name a unit from here, so no caller-supplied string reaches the shell
+# (and we never use shell=True — every call is an argv list).
+JOBS = [
+    ("nvr-recorder",   "Recorder"),
+    ("nvr-detect",     "Detection poller"),
+    ("nvr-detect-api", "Detection API"),
+    ("nvr-playback",   "Playback API"),
+    ("nvr-gapfill",    "SD gap-fill"),
+    ("nvr-signin",     "Sign-in"),
+]
+JOB_UNITS = {u for u, _ in JOBS}
+_LOGLINE = re.compile(r"^(\S+)\s+\S+\s+[^:]+:\s?(.*)$")   # "<iso> <host> <comm>[pid]: <msg>" -> iso, msg
+
+
+def _run(argv, timeout=6):
+    try:
+        return subprocess.run(argv, capture_output=True, text=True, timeout=timeout).stdout
+    except Exception:
+        return ""
+
+
+def unit_logs(unit, n=120):
+    if unit not in JOB_UNITS:
+        return []
+    out = _run(["journalctl", "-u", unit, "-n", str(n), "--no-pager", "-o", "short-iso"])
+    lines = []
+    for ln in out.splitlines():
+        if not ln or ln.startswith("-- "):            # drop "-- No entries --" / boot markers
+            continue
+        m = _LOGLINE.match(ln)
+        lines.append(f"{m.group(1)} {m.group(2)}" if m else ln)
+    return lines
+
+
+def job_status(unit, tail=6):
+    p = {}
+    for ln in _run(["systemctl", "show", unit, "-p",
+                    "ActiveState,SubState,NRestarts,MemoryCurrent,CPUUsageNSec,"
+                    "ActiveEnterTimestampMonotonic,Description,MainPID"]).splitlines():
+        k, _, v = ln.partition("=")
+        p[k] = v
+
+    def num(k):
+        try:
+            return int(p.get(k, ""))
+        except ValueError:
+            return None
+
+    mem, cpu = num("MemoryCurrent"), num("CPUUsageNSec")
+    entered = num("ActiveEnterTimestampMonotonic")
+    active = p.get("ActiveState") == "active"
+    uptime = None
+    if active and entered:
+        uptime = round(time.clock_gettime(time.CLOCK_MONOTONIC) - entered / 1e6)
+    return {
+        "unit": unit, "active": p.get("ActiveState"), "sub": p.get("SubState"),
+        "desc": p.get("Description"), "restarts": num("NRestarts"), "pid": num("MainPID") or None,
+        "uptime_s": uptime if uptime and uptime > 0 else None,
+        "mem_mb": round(mem / 1048576, 1) if mem is not None and mem < (1 << 62) else None,
+        "cpu_s": round(cpu / 1e9) if cpu else None,
+        "tail": unit_logs(unit, tail),
+    }
 
 
 def db():
@@ -195,6 +261,15 @@ class H(BaseHTTPRequestHandler):
                     "disk_free_gb": round(du.free / 1e9, 1), "disk_total_gb": round(du.total / 1e9, 1)}))
             if u.path == "/api/export.mp4":
                 return self.export(*self.args(q, limit=MAX_EXPORT))
+            if u.path == "/api/jobs":
+                return self.send(200, json.dumps({"now": time.time(),
+                                                  "services": [job_status(un) for un, _ in JOBS]}))
+            if u.path == "/api/jobs/logs":
+                unit = q.get("unit", [""])[0]
+                if unit not in JOB_UNITS:
+                    return self.err(400, "unknown unit")
+                n = max(1, min(int(q.get("n", ["300"])[0]), 1000))
+                return self.send(200, json.dumps({"unit": unit, "lines": unit_logs(unit, n)}))
             return self.err(404, "not found")
         except (KeyError, ValueError) as e:
             return self.err(400, str(e))
