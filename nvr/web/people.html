@@ -3,155 +3,184 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#080b0f">
+<meta name="theme-color" content="#0c1312">
 <title>People · Guttedar Nilaya</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  --bg:#080b0f; --bg2:#0c1117;
-  --panel:#111720; --panel2:#171e28; --elev:#212b37;
-  --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
-  --text:#eef3f8; --muted:#97a3b1; --faint:#5f6b78;
-  --rec:#3f8cff; --ok:#2fd27a; --warn:#f5a524; --live:#ff3b4e;
+  /* deep petrol-green night — the house after dark, not a blue SOC and not cream */
+  --bg:#0c1312; --bg2:#090f0e;
+  --panel:#121b19; --panel2:#182320; --elev:#1f2c27;
+  --line:rgba(236,224,205,.08); --line2:rgba(236,224,205,.17);
+  --text:#edf1ea; --muted:#99a69c; --faint:#5f6c63;
+  /* one bold color, used only where it means something: identified / primary / selected / "to do" */
+  --amber:#f0a83a; --amber-deep:#c6831f; --amber-ink:#241704; --amber-glow:rgba(240,168,58,.16);
+  --rust:#d2705a;                                   /* destructive only (dismiss / remove) */
   --radius:16px; --radius-sm:11px;
-  --lift:0 1px 0 rgba(255,255,255,.045) inset;
-  --shadow:0 18px 48px -28px rgba(0,0,0,.9);
+  --shadow:0 20px 50px -30px rgba(0,0,0,.92);
   color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);
-  font:15px/1.5 "IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font:15px/1.5 "Hanken Grotesk",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-tap-highlight-color:transparent}
-body{min-height:100dvh;
-  background:radial-gradient(120% 56% at 50% -8%,rgba(63,140,255,.07),transparent 60%),
-    radial-gradient(140% 80% at 50% -4%,#141c27 0%,var(--bg) 54%);background-attachment:fixed}
-.mono{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+body{min-height:100dvh}
+/* .mono keeps its JS hook but is no longer monospace — numbers just align */
+.mono{font-variant-numeric:tabular-nums}
 button{font:inherit;font-weight:500;color:var(--text);background:var(--panel2);border:1px solid var(--line);
   border-radius:var(--radius-sm);padding:0 15px;min-height:44px;cursor:pointer;touch-action:manipulation;
-  display:inline-flex;align-items:center;justify-content:center;gap:7px;box-shadow:var(--lift);
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;
   transition:background .16s,border-color .16s,color .16s,transform .05s}
 button:hover{background:var(--elev);border-color:var(--line2)}
 button:active{transform:scale(.975)}
-button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--rec)}
+button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--amber)}
+button:disabled{opacity:.5;cursor:default}
+button.busy{position:relative;pointer-events:none;color:transparent!important}
+button.busy::after{content:"";position:absolute;inset:0;margin:auto;width:15px;height:15px;
+  border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:s .8s linear infinite}
 [hidden]{display:none!important}
-a{color:var(--rec);text-decoration:none}
-.app{max-width:1060px;margin:0 auto;padding:18px 16px calc(28px + env(safe-area-inset-bottom))}
-header{display:flex;align-items:center;gap:12px;margin-bottom:18px;padding:0 2px}
-header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1}
-.back{width:44px;padding:0;font-size:18px;color:var(--muted)}
+a{color:var(--amber);text-decoration:none}
+.app{max-width:1060px;margin:0 auto;padding:16px 16px calc(28px + env(safe-area-inset-bottom))}
+/* masthead: the house nameplate carries the identity; a live status line carries the call to action */
+header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2px 0}
+.back{width:40px;height:44px;padding:0;font-size:21px;color:var(--muted);background:transparent;border-color:transparent}
+.back:hover{background:var(--panel2);border-color:var(--line)}
+.masthead{flex:1;min-width:0;line-height:1.08}
+.house{font-family:"Bricolage Grotesque",serif;font-weight:700;font-size:23px;letter-spacing:-.02em;
+  color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kicker{font-size:11.5px;color:var(--muted);margin-top:1px;letter-spacing:.01em}
 .ghost{background:var(--panel2);color:var(--muted);font-size:13px;min-height:38px}
-h2{font-size:13px;font-weight:600;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);
-  margin:26px 2px 12px;display:flex;align-items:center;gap:9px}
-h2 .n{color:var(--faint);font-weight:500}
-h2:first-of-type{margin-top:6px}
-/* grids */
-.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:12px}
-.crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(88px,1fr));gap:10px}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius-sm);overflow:hidden;
-  box-shadow:var(--lift);text-align:left;padding:0;flex-direction:column;align-items:stretch;min-height:0}
-.card .ph{aspect-ratio:3/4;background:var(--bg2) center/cover;display:block;width:100%;object-fit:cover}
-.card .meta{padding:8px 10px}
-.card .nm{font-weight:600;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .ct{font-size:11.5px;color:var(--muted)}
-.thumb{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;border:1px solid var(--line);
-  background:var(--bg2);padding:0;box-shadow:var(--lift)}
-.thumb img{width:100%;height:100%;object-fit:cover;display:block}
-.thumb .sc{position:absolute;left:5px;bottom:5px;background:rgba(8,11,15,.72);backdrop-filter:blur(6px);
-  font-size:10.5px;padding:2px 6px;border-radius:6px;color:var(--muted);font-variant-numeric:tabular-nums}
-.thumb .cnt{position:absolute;right:5px;top:5px;display:inline-flex;align-items:center;gap:3px;
-  background:var(--rec);color:#00122b;font-weight:700;font-size:11px;padding:2px 7px;border-radius:999px;
-  box-shadow:0 2px 8px rgba(0,0,0,.45);font-variant-numeric:tabular-nums}
-.thumb .cnt::before{content:"";width:5px;height:5px;border-radius:50%;background:#00122b;opacity:.55}
-.thumb.sel{outline:3px solid var(--rec);outline-offset:-3px}
-.thumb .chk{position:absolute;left:5px;top:5px;width:22px;height:22px;border-radius:50%;background:rgba(8,11,15,.55);
-  border:1.5px solid rgba(255,255,255,.7);color:#00122b;align-items:center;justify-content:center;font-size:13px;
+.status{display:flex;align-items:center;gap:9px;margin:14px 2px 20px;font-size:13.5px;font-weight:500;color:var(--muted)}
+.status .dot{width:7px;height:7px;border-radius:50%;background:var(--faint);flex:none}
+.status.act{color:var(--text);font-weight:600}
+.status.act .dot{background:var(--amber);box-shadow:0 0 0 4px var(--amber-glow)}
+h2{font-family:"Bricolage Grotesque",serif;font-size:16.5px;font-weight:600;letter-spacing:-.01em;color:var(--text);
+  text-transform:none;margin:28px 2px 14px;padding-bottom:10px;border-bottom:1px solid var(--line);
+  display:flex;align-items:center;gap:9px}
+h2 .n{color:var(--faint);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums}
+h2:first-of-type{margin-top:4px}
+/* grids — one shared column rhythm so Known and Unidentified rows line up */
+.people,.crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:12px}
+/* known person = a labelled identity plate: portrait fills the square, name engraved on a gradient footer */
+.card{position:relative;aspect-ratio:1/1;background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+  overflow:hidden;text-align:left;padding:0;display:block;min-height:0;
+  transition:border-color .16s,transform .06s,box-shadow .16s}
+.card:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--shadow)}
+.card:active{transform:scale(.985)}
+.card .ph{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 22%;
+  background:var(--bg2) center/cover;display:block}
+.card .meta{position:absolute;inset:auto 0 0 0;padding:26px 11px 11px;
+  background:linear-gradient(to top,rgba(5,9,8,.94),rgba(5,9,8,.6) 46%,transparent)}
+.card .nm{color:#fbfcfa;font-weight:600;font-size:14px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,.55)}
+.card .ct{font-size:11px;color:rgba(237,241,234,.72);margin-top:1px;font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,.55)}
+/* unidentified = cool, unlit tile awaiting a name */
+.thumb{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;border:1px solid var(--line);
+  background:var(--bg2);padding:0;transition:border-color .16s,transform .06s}
+.thumb:hover{border-color:var(--line2)}
+.thumb:active{transform:scale(.98)}
+.thumb img{width:100%;height:100%;object-fit:cover;object-position:50% 22%;display:block}
+.thumb .sc{position:absolute;left:5px;bottom:5px;background:rgba(9,15,14,.76);backdrop-filter:blur(6px);
+  font-size:10.5px;padding:2px 7px;border-radius:999px;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:.2px}
+.thumb .cnt,.card .cnt{position:absolute;right:6px;top:6px;z-index:2;display:inline-flex;align-items:center;
+  background:rgba(9,15,14,.7);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.1);color:var(--text);
+  font-weight:600;font-size:11px;padding:2px 8px;border-radius:999px;font-variant-numeric:tabular-nums}
+.thumb.sel{outline:2.5px solid var(--amber);outline-offset:-2.5px}
+.thumb .chk{position:absolute;left:5px;top:5px;width:22px;height:22px;border-radius:50%;background:rgba(9,15,14,.6);
+  border:1.5px solid rgba(255,255,255,.7);color:var(--amber-ink);align-items:center;justify-content:center;font-size:13px;
   font-weight:800;display:none}
 body.selecting .thumb .chk{display:inline-flex}
-.thumb.sel .chk{background:var(--rec);border-color:var(--rec)}
+.thumb.sel .chk{background:var(--amber);border-color:var(--amber)}
 .actionbar{position:fixed;left:50%;bottom:calc(16px + env(safe-area-inset-bottom));transform:translateX(-50%);
   display:flex;gap:8px;align-items:center;background:var(--elev);border:1px solid var(--line2);border-radius:999px;
   padding:8px 10px 8px 16px;box-shadow:var(--shadow);z-index:15;max-width:calc(100vw - 24px)}
 .actionbar .ct{font-size:13px;font-weight:600;white-space:nowrap;margin-right:2px}
 .actionbar button{min-height:40px;padding:0 13px}
-.actionbar .tag{background:var(--rec);border-color:transparent;color:#001;font-weight:700}
-.actionbar .rej{color:var(--warn);background:var(--panel2)}
+.actionbar .tag{background:var(--amber);border-color:transparent;color:var(--amber-ink);font-weight:700}
+.actionbar .rej{color:var(--rust);background:var(--panel2)}
 .actionbar .cancel{color:var(--muted);background:transparent;border-color:transparent}
 .actionbar button:disabled{opacity:.4;pointer-events:none}
 .psheet .crops{max-height:48vh;overflow:auto;margin:12px 0 4px;clear:both}
 .thumb .play{position:absolute;right:5px;top:5px;width:24px;height:24px;border-radius:50%;z-index:2;
-  background:rgba(8,11,15,.6);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.22);
+  background:rgba(9,15,14,.62);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.22);
   color:#fff;font-size:11px;display:none;align-items:center;justify-content:center;cursor:pointer;padding-left:2px}
 .psheet .thumb .play{display:inline-flex}
-.thumb .play:hover{background:var(--rec,#e0245e)}
+.thumb .play:hover{background:var(--amber);color:var(--amber-ink);border-color:var(--amber)}
 .psheet .thumb .chk{display:none}
-.psheet .thumb.sel{outline-color:var(--warn)}
-.psheet .thumb.sel .chk{display:inline-flex;background:var(--warn);border-color:var(--warn)}
-.datebar{display:flex;align-items:center;gap:8px;margin:2px 2px 18px}
+.psheet .thumb.sel{outline-color:var(--rust)}
+.psheet .thumb.sel .chk{display:inline-flex;background:var(--rust);border-color:var(--rust);color:#fff}
+.datebar{display:flex;align-items:center;gap:8px;margin:0 2px 20px}
 .datebar .icon{width:40px;min-height:40px;padding:0;font-size:18px;line-height:1}
-.datebar .dlabel{flex:1;text-align:center;font-weight:600;font-size:13.5px;cursor:pointer;user-select:none;
-  font-variant-numeric:tabular-nums;letter-spacing:.2px}
+.datebar .dlabel{flex:1;text-align:center;font-weight:600;font-size:14px;cursor:pointer;user-select:none;
+  font-variant-numeric:tabular-nums;letter-spacing:.1px}
 .datebar .ghost{font-size:12.5px}
-.datebar .ghost.on{color:var(--rec);border-color:var(--rec)}
+.datebar .ghost.on{color:var(--amber);border-color:var(--amber)}
 .datebar button:disabled{opacity:.38;pointer-events:none}
 .empty{color:var(--faint);font-size:14px;padding:18px 2px}
 .note{color:var(--muted);font-size:13px;padding:14px;background:var(--panel);border:1px solid var(--line);
   border-radius:var(--radius-sm)}
 /* sheet */
-.scrim{position:fixed;inset:0;background:rgba(4,6,9,.62);backdrop-filter:blur(3px);z-index:10;
+.scrim{position:fixed;inset:0;background:rgba(5,8,7,.66);backdrop-filter:blur(3px);z-index:10;
   display:flex;align-items:flex-end;justify-content:center}
 .sheet{background:var(--panel);border:1px solid var(--line2);border-bottom:0;
-  border-radius:var(--radius) var(--radius) 0 0;width:100%;max-width:560px;padding:16px 16px calc(18px + env(safe-area-inset-bottom));
+  border-radius:var(--radius) var(--radius) 0 0;width:100%;max-width:560px;padding:18px 16px calc(18px + env(safe-area-inset-bottom));
   box-shadow:var(--shadow);animation:up .2s ease}
 @keyframes up{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}
-.sheet .big{width:132px;aspect-ratio:3/4;object-fit:cover;border-radius:12px;border:1px solid var(--line);float:left;margin:0 14px 10px 0;background:var(--bg2)}
-.sheet h3{margin:2px 0 2px;font-size:16px}
+.sheet .big{width:120px;aspect-ratio:1/1;object-fit:cover;object-position:50% 22%;border-radius:12px;border:1px solid var(--line);float:left;margin:0 14px 10px 0;background:var(--bg2)}
+.sheet h3{font-family:"Bricolage Grotesque",serif;margin:0 0 4px;font-size:19px;font-weight:600;letter-spacing:-.01em}
 .sheet .sub{color:var(--muted);font-size:12.5px;margin-bottom:12px}
-.sheet .meta-line{font-size:12px;color:var(--rec);margin:0 0 10px;letter-spacing:.2px;line-height:1.45}
-.field{display:flex;gap:8px;margin:10px 0 4px;clear:both}
+.sheet .meta-line{font-size:12px;color:var(--amber);margin:0 0 10px;letter-spacing:.2px;line-height:1.45}
+.field{display:flex;gap:8px;margin:12px 0 4px;clear:both}
 .field input{flex:1;min-height:46px;background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius-sm);
   color:var(--text);font:inherit;padding:0 14px}
-.field input:focus{outline:none;border-color:var(--rec)}
-.field button{min-width:88px;background:var(--rec);border-color:transparent;color:#001;font-weight:700}
+.field input::placeholder{color:var(--faint)}
+.field input:focus{outline:none;border-color:var(--amber);box-shadow:0 0 0 3px var(--amber-glow)}
+.field button{min-width:88px;background:var(--amber);border-color:transparent;color:var(--amber-ink);font-weight:700}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
 .chip{min-height:38px;font-size:13px;padding:0 13px;background:var(--panel2)}
-.row{display:flex;gap:8px;margin-top:12px}
-.row .reject{flex:1;color:var(--warn);background:var(--panel2)}
+.row{display:flex;gap:8px;margin-top:14px}
+.row .reject{flex:1;color:var(--rust);background:var(--panel2)}
 .row .cancel{flex:1;color:var(--muted);background:transparent;border-color:transparent}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);
   background:var(--elev);border:1px solid var(--line2);border-radius:999px;padding:10px 18px;font-size:13px;
   box-shadow:var(--shadow);z-index:20;opacity:0;transition:opacity .2s,transform .2s;pointer-events:none}
 .toast.show{opacity:1;transform:translateX(-50%) translateY(-2px)}
-.toast.bad{border-color:rgba(255,59,78,.5)}
-.spin{width:26px;height:26px;border:2.5px solid rgba(255,255,255,.16);border-top-color:#fff;border-radius:50%;
+.toast.bad{border-color:rgba(210,112,90,.55)}
+.spin{width:26px;height:26px;border:2.5px solid rgba(236,224,205,.14);border-top-color:var(--amber);border-radius:50%;
   animation:s 1s linear infinite;margin:30px auto}
 @keyframes s{to{transform:rotate(1turn)}}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.001ms!important;transition-duration:.001ms!important}}
 </style>
 </head>
 <body>
 <div class="app">
   <header>
     <button class="back" onclick="location.href='/'" aria-label="Back to live view">‹</button>
-    <h1>People</h1>
+    <div class="masthead">
+      <div class="house">Guttedar Nilaya</div>
+      <div class="kicker">People register</div>
+    </div>
     <button class="ghost" id="refresh">Refresh</button>
   </header>
 
   <div id="auth" class="note" hidden>You're not signed in. Open the <a href="/">live view</a> to sign in, then come back.</div>
   <div id="loading" class="spin"></div>
   <main id="main" hidden>
+    <div class="status" id="status" hidden></div>
     <div class="datebar">
       <button class="icon" id="pPrev" aria-label="Previous day">‹</button>
       <div class="dlabel" id="dLabel" role="button" tabindex="0" title="Pick a date">Today</div>
       <button class="icon" id="pNext" aria-label="Next day">›</button>
-      <button class="icon" id="pCal" aria-label="Pick a date">📅</button>
       <input type="date" id="pDate" aria-hidden="true" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0">
     </div>
-    <h2>People <span class="n" id="pn"></span></h2>
+    <h2>Known people <span class="n" id="pn"></span></h2>
     <div class="people" id="people"></div>
     <div class="empty" id="people-empty" hidden>No one tagged yet — name someone below and they'll appear here.</div>
 
-    <h2>Unknown <span class="n" id="un"></span><button class="ghost" id="selbtn" style="margin-left:auto" hidden>Select</button></h2>
+    <h2>Unidentified <span class="n" id="un"></span><button class="ghost" id="selbtn" style="margin-left:auto" hidden>Select</button></h2>
     <div class="crops" id="unknowns"></div>
     <div class="empty" id="unknowns-empty" hidden>No un-identified detections right now.</div>
   </main>
@@ -177,6 +206,15 @@ let ALLPEOPLE = [];      // every known person (tag suggestion chips, independen
 
 function toast(msg, bad){ const t=$('toast'); t.textContent=msg; t.className='toast show'+(bad?' bad':''); clearTimeout(t._t); t._t=setTimeout(()=>t.className='toast',2200); }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Disable a button + show a spinner while its async action runs; ignore repeat clicks; re-enable on finish.
+function withBusy(btn, fn){
+  if (!btn || btn.dataset.busy) return;
+  btn.dataset.busy = '1'; btn.disabled = true; btn.classList.add('busy');
+  return Promise.resolve().then(fn).finally(() => {
+    delete btn.dataset.busy;
+    if (btn.isConnected){ btn.disabled = false; btn.classList.remove('busy'); }  // sheet may have closed
+  });
+}
 const cropUrl = id => `/detapi/crop/${id}.jpg`;
 const hideBroken = img => { img.onerror = () => { const t=img.closest('.thumb,.card'); if(t) t.remove(); }; };
 // all times are rendered in the viewer's own timezone
@@ -218,12 +256,25 @@ async function load(){
       api.get('/detapi/people'+qs), api.get('/detapi/unknowns'+qs),
       api.get('/detapi/people')]);          // full known set: tag suggestions aren't limited to this day
     PEOPLE = people; ALLPEOPLE = allp;
-    renderPeople(people); renderUnknowns(unk);
+    renderPeople(people); renderUnknowns(unk); renderStatus(people, unk);
     $('loading').hidden = true; $('main').hidden = false;
   } catch (e) {
     $('loading').hidden = true;
     if (e === 'auth') $('auth').hidden = false; else toast('Could not load — '+e, true);
   }
+}
+
+// Status line = the page's call to action for the selected day: unknowns to clear, or a quiet all-clear.
+function renderStatus(people, unk){
+  const el = $('status'); if(!el) return;
+  const u = unk.length, p = people.length;
+  let txt, act = false;
+  if (u > 0){ txt = `${u} to identify`; act = true; }
+  else if (p > 0){ txt = `All identified · ${p} known`; }
+  else { txt = 'All quiet — no one seen'; }
+  el.className = 'status' + (act ? ' act' : '');
+  el.innerHTML = `<span class="dot"></span>${esc(txt)}`;
+  el.hidden = false;
 }
 
 function renderPeople(people){
@@ -233,7 +284,8 @@ function renderPeople(people){
   $('people').innerHTML = people.map(p => `
     <button class="card" onclick="openDetail({id:${p.id},person:true})">
       ${p.sample ? `<img class="ph" src="${cropUrl(p.sample)}" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="ph"></span>`}
-      <span class="meta"><span class="nm">${esc(p.name)}</span><span class="ct">${p.count} sighting${p.count===1?'':'s'}${p.last ? ` · ${relWhen(p.last)}` : ''}</span></span>
+      ${p.count ? `<span class="cnt mono" title="${p.count} sighting${p.count===1?'':'s'}">${p.count}</span>` : ''}
+      <span class="meta"><span class="nm">${esc(p.name)}</span>${p.last ? `<span class="ct">${relWhen(p.last)}</span>` : ''}</span>
     </button>`).join('');
 }
 
@@ -306,8 +358,8 @@ function openMultiTag(ids){
     </div>`;
   setTimeout(() => $('nm').focus(), 50);
   const go = () => assignMany(ids, $('nm').value);
-  $('mtag').onclick = go;
-  $('nm').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  $('mtag').onclick = e => withBusy(e.currentTarget, go);
+  $('nm').addEventListener('keydown', e => { if (e.key === 'Enter') $('mtag').click(); });
   document.querySelectorAll('.sheet .chip').forEach(c =>
     c.addEventListener('click', () => { const i = $('nm'); i.value = c.dataset.name; i.focus(); }));
 }
@@ -398,7 +450,7 @@ async function openDetail(o){
   }
   draw(); upd();
 
-  $('save').onclick = async () => {
+  $('save').onclick = e => withBusy(e.currentTarget, async () => {
     const name = $('nm').value.trim();
     if(!name){ toast('Enter a name', true); return; }
     try{
@@ -406,34 +458,33 @@ async function openDetail(o){
       else { const r = await api.post('/detapi/tag', {id:o.id, name}); toast(`Tagged ${name}${r.rematched?` · ${r.rematched} re-matched`:''}`); }
       DIRTY = true; closeSheet();
     }catch(e){ toast(e==='auth'?'Sign in first':'Save failed', true); }
-  };
+  });
   $('nm').addEventListener('keydown', e => { if(e.key==='Enter') $('save').click(); });
 
-  $('premove').onclick = async () => {
+  $('premove').onclick = e => withBusy(e.currentTarget, async () => {
     const ids = [...RM]; if(!ids.length) return;
     try{ await api.post('/detapi/unassign', {ids});
       for(const id of ids){ const i = dets.findIndex(d => d.id===id); if(i>=0) dets.splice(i,1); }
       RM.clear(); draw(); upd(); DIRTY = true;       // keep the sheet open so you can still tag the rest
       toast(`Removed ${ids.length}`);
     }catch(e){ toast(e==='auth'?'Sign in first':'Remove failed', true); }
-  };
+  });
 
-  if (!isP) $('pdismiss').onclick = async () => {
+  if (!isP) $('pdismiss').onclick = e => withBusy(e.currentTarget, async () => {
     try{ await api.post('/detapi/reject', {id:o.id}); DIRTY = true; closeSheet(); toast('Dismissed'); }
     catch(e){ toast(e==='auth'?'Sign in first':'Failed', true); }
-  };
+  });
 }
 
 $('refresh').onclick = load;
 $('selbtn').onclick = () => SEL ? exitSelect() : enterSelect();
 $('ab-cancel').onclick = exitSelect;
 $('ab-tag').onclick = () => { if (SEL && SEL.size) openMultiTag([...SEL]); };
-$('ab-rej').onclick = () => { if (SEL && SEL.size) dismissMany([...SEL]); };
+$('ab-rej').onclick = e => { if (SEL && SEL.size) withBusy(e.currentTarget, () => dismissMany([...SEL])); };
 // date navigation
 $('pPrev').onclick = () => setDay(dayKey(dayStart(DAY) - 43200));
 $('pNext').onclick = () => setDay(dayKey(dayStart(DAY) + 129600));
 const openDatePick = () => { const d = $('pDate'); d.value = DAY; d.max = dayKey(nowS()); d.showPicker ? d.showPicker() : d.focus(); };
-$('pCal').onclick = openDatePick;
 $('pDate').onchange = e => { if (e.target.value) setDay(e.target.value); };
 $('dLabel').onclick = openDatePick;
 $('dLabel').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePick(); } };
