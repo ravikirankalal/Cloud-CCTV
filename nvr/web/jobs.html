@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1312">
+<title>Jobs · Guttedar Nilaya</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c1312; --bg2:#090f0e; --panel:#121b19; --panel2:#182320; --elev:#1f2c27;
+  --line:rgba(236,224,205,.08); --line2:rgba(236,224,205,.17);
+  --text:#edf1ea; --muted:#99a69c; --faint:#5f6c63;
+  --amber:#f0a83a; --amber-deep:#c6831f; --amber-ink:#241704; --amber-glow:rgba(240,168,58,.16);
+  --rust:#d2705a; --good:#6fcaa0;
+  --radius:16px; --radius-sm:11px; --shadow:0 20px 50px -30px rgba(0,0,0,.92);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.5 "Hanken Grotesk",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-tap-highlight-color:transparent}
+body{min-height:100dvh}
+.mono{font-variant-numeric:tabular-nums}
+[hidden]{display:none!important}
+a{color:var(--amber);text-decoration:none}
+button{font:inherit;font-weight:500;color:var(--text);background:var(--panel2);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:0 15px;min-height:44px;cursor:pointer;touch-action:manipulation;
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;transition:background .16s,border-color .16s}
+button:hover{background:var(--elev);border-color:var(--line2)}
+button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--amber)}
+.app{max-width:900px;margin:0 auto;padding:16px 16px calc(28px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2px 0}
+.back{width:40px;height:44px;padding:0;font-size:21px;color:var(--muted);background:transparent;border-color:transparent}
+.back:hover{background:var(--panel2);border-color:var(--line)}
+.masthead{flex:1;min-width:0;line-height:1.08}
+.house{font-family:"Bricolage Grotesque",serif;font-weight:700;font-size:23px;letter-spacing:-.02em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kicker{font-size:11.5px;color:var(--muted);margin-top:1px}
+.ghost{background:var(--panel2);color:var(--muted);font-size:13px;min-height:38px}
+.status{display:flex;align-items:center;gap:9px;margin:14px 2px 18px;font-size:13.5px;font-weight:500;color:var(--muted)}
+.status .dot{width:7px;height:7px;border-radius:50%;background:var(--good);flex:none}
+.status.bad{color:var(--text);font-weight:600}
+.status.bad .dot{background:var(--rust);box-shadow:0 0 0 4px rgba(210,112,90,.16)}
+.note{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:16px;color:var(--muted);margin:10px 2px}
+.jobs{display:flex;flex-direction:column;gap:12px}
+.job{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);overflow:hidden}
+.job.down{border-color:rgba(210,112,90,.4)}
+.hd{display:flex;align-items:center;gap:11px;padding:13px 15px;cursor:pointer;user-select:none}
+.hd:hover{background:var(--panel2)}
+.caret{color:var(--faint);font-size:12px;transition:transform .16s;flex:none;width:12px}
+.job.open .caret{transform:rotate(90deg)}
+.who{min-width:0;flex:1}
+.nm{font-family:"Bricolage Grotesque",serif;font-weight:600;font-size:15px;letter-spacing:-.01em;line-height:1.15}
+.unit{font-size:11px;color:var(--faint);font-variant-numeric:tabular-nums}
+.pill{flex:none;font-size:11px;font-weight:600;letter-spacing:.02em;padding:4px 9px;border-radius:999px;
+  text-transform:uppercase;background:rgba(111,202,160,.14);color:var(--good)}
+.pill.down{background:rgba(210,112,90,.16);color:var(--rust)}
+.pill.warn{background:var(--amber-glow);color:var(--amber)}
+.pill.idle{background:var(--panel2);color:var(--faint)}
+.meta{display:flex;flex-wrap:wrap;gap:4px 16px;padding:0 15px 12px 38px;font-size:12.5px;color:var(--muted);
+  font-variant-numeric:tabular-nums}
+.meta b{color:var(--text);font-weight:600}
+.log{margin:0 12px 12px;background:var(--bg2);border:1px solid var(--line);border-radius:var(--radius-sm);
+  font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#cdd8cf;
+  padding:11px 13px;max-height:48vh;overflow:auto;white-space:pre-wrap;word-break:break-word}
+.log .t{color:var(--faint)}
+.log.tail{max-height:none;color:var(--muted)}
+.foot{color:var(--faint);font-size:12px;text-align:center;margin:18px 2px 0;font-variant-numeric:tabular-nums}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <button class="back" onclick="backToLive()" aria-label="Back to live view">‹</button>
+    <div class="masthead"><div class="house">Guttedar Nilaya</div><div class="kicker">Background jobs</div></div>
+    <button class="ghost" id="refresh">Refresh</button>
+  </header>
+  <div class="status" id="status" hidden></div>
+  <div id="auth" class="note" hidden>You're not signed in. Open the <a href="/">live view</a> to sign in, then come back.</div>
+  <div id="err" class="note" hidden></div>
+  <div class="jobs" id="jobs"></div>
+  <div class="foot" id="foot" hidden></div>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+// Back to live via history when we came from it, so the live page restores from bfcache.
+function backToLive(){
+  try { const r = document.referrer && new URL(document.referrer);
+    if (history.length > 1 && r && r.origin === location.origin && r.pathname === '/') return history.back();
+  } catch {}
+  location.href = '/';
+}
+async function get(p){
+  const r = await fetch(p, {cache:'no-store'});
+  if (r.status === 401 || r.status === 403) throw 'auth';
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
+}
+function dur(s){
+  if (s == null) return '—';
+  if (s < 60) return s + 's';
+  const d = s/86400|0, h = (s%86400)/3600|0, m = (s%3600)/60|0;
+  if (d) return `${d}d ${h}h`;
+  if (h) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+const OPEN = new Set();                 // units whose full logs are expanded
+let TIMER = null;
+
+// one log line = leading ISO timestamp (dimmed) + message
+function logHtml(lines){
+  return (lines||[]).map(l => {
+    const sp = l.indexOf(' ');
+    const ts = sp > 0 ? l.slice(0, sp) : '';
+    const msg = sp > 0 ? l.slice(sp+1) : l;
+    const t = /^\d{4}-\d\d-\d\dT/.test(ts) ? `<span class="t">${esc(ts.slice(11,19))}</span> ` : '';
+    return t + esc(msg);
+  }).join('\n');
+}
+
+function pill(j){
+  if (j.active === 'active' && j.sub === 'running') return ['pill','running'];
+  if (j.active === 'failed') return ['pill down','failed'];
+  if (j.active === 'activating' || j.sub === 'auto-restart') return ['pill warn', j.sub || 'starting'];
+  if (j.active === 'active') return ['pill', j.sub || 'active'];
+  return ['pill idle', j.active || 'stopped'];
+}
+
+function render(d){
+  const svc = d.services || [];
+  const down = svc.filter(j => j.active !== 'active');
+  const st = $('status');
+  st.hidden = false;
+  st.className = 'status' + (down.length ? ' bad' : '');
+  st.innerHTML = `<span class="dot"></span>` + (down.length
+    ? `${down.length} not running — ${esc(down.map(j=>j.unit).join(', '))}`
+    : `All ${svc.length} services running`);
+
+  $('jobs').innerHTML = svc.map(j => {
+    const [cls, label] = pill(j);
+    const open = OPEN.has(j.unit);
+    const r = j.restarts ? ` · restarts <b>${j.restarts}</b>` : '';
+    return `<div class="job${j.active!=='active'?' down':''}${open?' open':''}" data-unit="${j.unit}">
+      <div class="hd" data-t="${j.unit}">
+        <span class="caret">▶</span>
+        <span class="who"><div class="nm">${esc(j.desc||j.unit)}</div><div class="unit mono">${j.unit}${j.pid?' · pid '+j.pid:''}</div></span>
+        <span class="${cls}">${esc(label)}</span>
+      </div>
+      <div class="meta">
+        <span>up <b>${dur(j.uptime_s)}</b></span>
+        <span>mem <b>${j.mem_mb!=null?j.mem_mb+' MB':'—'}</b></span>
+        <span>cpu <b>${j.cpu_s!=null?dur(j.cpu_s):'—'}</b></span>${r}
+      </div>
+      <div class="log tail" data-tail="${j.unit}">${logHtml(j.tail)}</div>
+      ${open?`<div class="log" data-full="${j.unit}">loading…</div>`:''}
+    </div>`;
+  }).join('');
+
+  // collapsed cards show the short tail; expanded ones hide the tail and show full logs
+  for (const j of svc){
+    const tail = document.querySelector(`[data-tail="${j.unit}"]`);
+    if (tail) tail.hidden = OPEN.has(j.unit);
+  }
+  $('jobs').querySelectorAll('.hd').forEach(h =>
+    h.addEventListener('click', () => toggle(h.dataset.t)));
+  for (const u of OPEN) loadLogs(u);
+  $('foot').hidden = false;
+  $('foot').textContent = 'updated ' + new Date((d.now||Date.now()/1000)*1000).toLocaleTimeString();
+}
+
+async function loadLogs(unit){
+  const el = document.querySelector(`[data-full="${unit}"]`);
+  if (!el) return;
+  try {
+    const d = await get('/api/jobs/logs?unit=' + encodeURIComponent(unit) + '&n=300');
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    el.innerHTML = logHtml(d.lines) || '<span class="t">no log entries</span>';
+    if (atBottom) el.scrollTop = el.scrollHeight;     // keep pinned to newest unless scrolled up
+  } catch (e) { if (e !== 'auth') el.textContent = 'could not load logs'; }
+}
+
+function toggle(unit){
+  OPEN.has(unit) ? OPEN.delete(unit) : OPEN.add(unit);
+  load();
+}
+
+async function load(){
+  try {
+    const d = await get('/api/jobs');
+    $('auth').hidden = true; $('err').hidden = true;
+    render(d);
+  } catch (e){
+    if (e === 'auth'){ $('auth').hidden = false; $('status').hidden = true; $('jobs').innerHTML = ''; }
+    else { $('err').hidden = false; $('err').textContent = 'Could not load jobs — ' + e; }
+  }
+}
+
+function startPoll(){ stopPoll(); TIMER = setInterval(load, 5000); }
+function stopPoll(){ if (TIMER) clearInterval(TIMER); TIMER = null; }
+
+$('refresh').onclick = load;
+document.addEventListener('visibilitychange', () => document.hidden ? stopPoll() : (load(), startPoll()));
+window.addEventListener('pageshow', e => { if (e.persisted) { load(); startPoll(); } });
+window.addEventListener('pagehide', stopPoll);
+load();
+startPoll();
+</script>
+</body>
+</html>
