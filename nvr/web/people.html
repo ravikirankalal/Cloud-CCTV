@@ -57,32 +57,33 @@ h2{font-family:"Bricolage Grotesque",serif;font-size:16.5px;font-weight:600;lett
   display:flex;align-items:center;gap:9px}
 h2 .n{color:var(--faint);font-weight:500;font-size:13px;font-variant-numeric:tabular-nums}
 h2:first-of-type{margin-top:4px}
-/* grids */
-.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(106px,1fr));gap:12px}
-.crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:10px}
-/* known person = an identity plate, marked "in the light" with a thin amber keyline */
-.card{position:relative;background:var(--panel);border:1px solid var(--line);border-radius:12px;overflow:hidden;
-  text-align:left;padding:0;display:flex;flex-direction:column;align-items:stretch;min-height:0;
+/* grids — one shared column rhythm so Known and Unidentified rows line up */
+.people,.crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(104px,1fr));gap:12px}
+/* known person = a labelled identity plate: portrait fills the square, name engraved on a gradient footer */
+.card{position:relative;aspect-ratio:1/1;background:var(--bg2);border:1px solid var(--line);border-radius:12px;
+  overflow:hidden;text-align:left;padding:0;display:block;min-height:0;
   transition:border-color .16s,transform .06s,box-shadow .16s}
-.card::before{content:"";position:absolute;inset:0 0 auto 0;height:2px;z-index:2;
-  background:linear-gradient(90deg,var(--amber),var(--amber-deep))}
 .card:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--shadow)}
 .card:active{transform:scale(.985)}
-.card .ph{aspect-ratio:3/4;background:var(--bg2) center/cover;display:block;width:100%;object-fit:cover}
-.card .meta{padding:9px 11px 10px}
-.card .nm{font-weight:600;font-size:14px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.card .ct{font-size:11.5px;color:var(--muted);margin-top:2px;font-variant-numeric:tabular-nums}
+.card .ph{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 22%;
+  background:var(--bg2) center/cover;display:block}
+.card .meta{position:absolute;inset:auto 0 0 0;padding:26px 11px 11px;
+  background:linear-gradient(to top,rgba(5,9,8,.94),rgba(5,9,8,.6) 46%,transparent)}
+.card .nm{color:#fbfcfa;font-weight:600;font-size:14px;letter-spacing:-.01em;white-space:nowrap;overflow:hidden;
+  text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,.55)}
+.card .ct{font-size:11px;color:rgba(237,241,234,.72);margin-top:1px;font-variant-numeric:tabular-nums;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;text-shadow:0 1px 3px rgba(0,0,0,.55)}
 /* unidentified = cool, unlit tile awaiting a name */
-.thumb{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;border:1px solid var(--line);
+.thumb{position:relative;aspect-ratio:1/1;border-radius:10px;overflow:hidden;border:1px solid var(--line);
   background:var(--bg2);padding:0;transition:border-color .16s,transform .06s}
 .thumb:hover{border-color:var(--line2)}
 .thumb:active{transform:scale(.98)}
-.thumb img{width:100%;height:100%;object-fit:cover;display:block}
+.thumb img{width:100%;height:100%;object-fit:cover;object-position:50% 22%;display:block}
 .thumb .sc{position:absolute;left:5px;bottom:5px;background:rgba(9,15,14,.76);backdrop-filter:blur(6px);
   font-size:10.5px;padding:2px 7px;border-radius:999px;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:.2px}
-.thumb .cnt{position:absolute;right:5px;top:5px;display:inline-flex;align-items:center;
-  background:rgba(9,15,14,.76);backdrop-filter:blur(6px);color:var(--text);font-weight:600;font-size:11px;
-  padding:2px 8px;border-radius:999px;font-variant-numeric:tabular-nums}
+.thumb .cnt,.card .cnt{position:absolute;right:6px;top:6px;z-index:2;display:inline-flex;align-items:center;
+  background:rgba(9,15,14,.7);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.1);color:var(--text);
+  font-weight:600;font-size:11px;padding:2px 8px;border-radius:999px;font-variant-numeric:tabular-nums}
 .thumb.sel{outline:2.5px solid var(--amber);outline-offset:-2.5px}
 .thumb .chk{position:absolute;left:5px;top:5px;width:22px;height:22px;border-radius:50%;background:rgba(9,15,14,.6);
   border:1.5px solid rgba(255,255,255,.7);color:var(--amber-ink);align-items:center;justify-content:center;font-size:13px;
@@ -124,7 +125,7 @@ body.selecting .thumb .chk{display:inline-flex}
   border-radius:var(--radius) var(--radius) 0 0;width:100%;max-width:560px;padding:18px 16px calc(18px + env(safe-area-inset-bottom));
   box-shadow:var(--shadow);animation:up .2s ease}
 @keyframes up{from{transform:translateY(16px);opacity:.6}to{transform:none;opacity:1}}
-.sheet .big{width:132px;aspect-ratio:3/4;object-fit:cover;border-radius:12px;border:1px solid var(--line);float:left;margin:0 14px 10px 0;background:var(--bg2)}
+.sheet .big{width:120px;aspect-ratio:1/1;object-fit:cover;object-position:50% 22%;border-radius:12px;border:1px solid var(--line);float:left;margin:0 14px 10px 0;background:var(--bg2)}
 .sheet h3{font-family:"Bricolage Grotesque",serif;margin:0 0 4px;font-size:19px;font-weight:600;letter-spacing:-.01em}
 .sheet .sub{color:var(--muted);font-size:12.5px;margin-bottom:12px}
 .sheet .meta-line{font-size:12px;color:var(--amber);margin:0 0 10px;letter-spacing:.2px;line-height:1.45}
@@ -169,7 +170,6 @@ body.selecting .thumb .chk{display:inline-flex}
       <button class="icon" id="pPrev" aria-label="Previous day">‹</button>
       <div class="dlabel" id="dLabel" role="button" tabindex="0" title="Pick a date">Today</div>
       <button class="icon" id="pNext" aria-label="Next day">›</button>
-      <button class="icon" id="pCal" aria-label="Pick a date">📅</button>
       <input type="date" id="pDate" aria-hidden="true" style="position:absolute;width:1px;height:1px;opacity:0;pointer-events:none;border:0;padding:0">
     </div>
     <h2>Known people <span class="n" id="pn"></span></h2>
@@ -271,7 +271,8 @@ function renderPeople(people){
   $('people').innerHTML = people.map(p => `
     <button class="card" onclick="openDetail({id:${p.id},person:true})">
       ${p.sample ? `<img class="ph" src="${cropUrl(p.sample)}" loading="lazy" onerror="this.style.visibility='hidden'">` : `<span class="ph"></span>`}
-      <span class="meta"><span class="nm">${esc(p.name)}</span><span class="ct">${p.count} sighting${p.count===1?'':'s'}${p.last ? ` · ${relWhen(p.last)}` : ''}</span></span>
+      ${p.count ? `<span class="cnt mono" title="${p.count} sighting${p.count===1?'':'s'}">${p.count}</span>` : ''}
+      <span class="meta"><span class="nm">${esc(p.name)}</span>${p.last ? `<span class="ct">${relWhen(p.last)}</span>` : ''}</span>
     </button>`).join('');
 }
 
@@ -471,7 +472,6 @@ $('ab-rej').onclick = () => { if (SEL && SEL.size) dismissMany([...SEL]); };
 $('pPrev').onclick = () => setDay(dayKey(dayStart(DAY) - 43200));
 $('pNext').onclick = () => setDay(dayKey(dayStart(DAY) + 129600));
 const openDatePick = () => { const d = $('pDate'); d.value = DAY; d.max = dayKey(nowS()); d.showPicker ? d.showPicker() : d.focus(); };
-$('pCal').onclick = openDatePick;
 $('pDate').onchange = e => { if (e.target.value) setDay(e.target.value); };
 $('dLabel').onclick = openDatePick;
 $('dLabel').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePick(); } };
