@@ -248,19 +248,45 @@ function renderDateBar(){
 }
 function setDay(key){ if(key > dayKey(nowS())) return; DAY = key; renderDateBar(); load(); }
 
+// ---- instant-switch cache ----------------------------------------------------
+// Switching to this page used to blank out and re-fetch everything from scratch.
+// Instead we snapshot the last good result per day in sessionStorage, paint it
+// instantly on open (no spinner flash), THEN fetch fresh in the background and
+// reconcile. Data is never left stale: every load() still hits the network and
+// a browser refresh always re-fetches — the cache only removes the blank wait.
+const snapKey = () => 'people-snap:' + DAY;
+function readSnap(){
+  try { const s = sessionStorage.getItem(snapKey()); return s ? JSON.parse(s) : null; }
+  catch { return null; }
+}
+function writeSnap(people, unk, allp){
+  try { sessionStorage.setItem(snapKey(), JSON.stringify({ people, unk, allp })); } catch {}
+}
+// Don't let a background refresh yank the ground out from under an open sheet or
+// an active multi-select; those are explicit user interactions.
+function canAutoRefresh(){ return !SEL && !$('sheet-host').firstChild; }
+
+function paint(people, unk, allp){
+  PEOPLE = people; ALLPEOPLE = allp;
+  renderPeople(people); renderUnknowns(unk); renderStatus(people, unk);
+  $('loading').hidden = true; $('main').hidden = false; $('auth').hidden = true;
+}
+
 async function load(){
-  $('loading').hidden = false; $('main').hidden = true; $('auth').hidden = true;
+  const snap = readSnap();
+  if (snap) paint(snap.people, snap.unk, snap.allp);           // instant from cache
+  else { $('loading').hidden = false; $('main').hidden = true; $('auth').hidden = true; }
   const qs = dayQuery();
   try {
     const [people, unk, allp] = await Promise.all([
       api.get('/detapi/people'+qs), api.get('/detapi/unknowns'+qs),
       api.get('/detapi/people')]);          // full known set: tag suggestions aren't limited to this day
-    PEOPLE = people; ALLPEOPLE = allp;
-    renderPeople(people); renderUnknowns(unk); renderStatus(people, unk);
-    $('loading').hidden = true; $('main').hidden = false;
+    paint(people, unk, allp);
+    writeSnap(people, unk, allp);
   } catch (e) {
-    $('loading').hidden = true;
-    if (e === 'auth') $('auth').hidden = false; else toast('Could not load — '+e, true);
+    if (e === 'auth'){ $('loading').hidden = true; $('main').hidden = true; $('auth').hidden = false; }
+    else if (snap) toast('Showing cached — refresh failed', true);   // keep the cached view up
+    else { $('loading').hidden = true; toast('Could not load — '+e, true); }
   }
 }
 
@@ -476,7 +502,10 @@ async function openDetail(o){
   });
 }
 
-$('refresh').onclick = load;
+// Explicit full reload: drop the cached snapshot and show the loading state, so
+// this button always does a complete fresh fetch (the "reload everything" escape
+// hatch). Day-switching and tab-switching use the fast cached path instead.
+$('refresh').onclick = () => { try { sessionStorage.removeItem(snapKey()); } catch {} $('loading').hidden = false; $('main').hidden = true; load(); };
 $('selbtn').onclick = () => SEL ? exitSelect() : enterSelect();
 $('ab-cancel').onclick = exitSelect;
 $('ab-tag').onclick = () => { if (SEL && SEL.size) openMultiTag([...SEL]); };
@@ -490,6 +519,12 @@ $('dLabel').onclick = openDatePick;
 $('dLabel').onkeydown = e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openDatePick(); } };
 renderDateBar();
 load();
+
+// Returning to this page (Back/forward bfcache restore, or re-focusing the tab)
+// refreshes data in the background without a full document reload — unless the
+// user is mid-interaction (sheet open or selecting), which we leave untouched.
+window.addEventListener('pageshow', e => { if (e.persisted && canAutoRefresh()) load(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && canAutoRefresh()) load(); });
 </script>
 </body>
 </html>
