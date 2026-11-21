@@ -158,7 +158,7 @@ body.selecting .thumb .chk{display:inline-flex}
 <body>
 <div class="app">
   <header>
-    <button class="back" onclick="location.href='/'" aria-label="Back to live view">‹</button>
+    <button class="back" onclick="backToLive()" aria-label="Back to live view">‹</button>
     <div class="masthead">
       <div class="house">Guttedar Nilaya</div>
       <div class="kicker">People register</div>
@@ -206,6 +206,14 @@ let ALLPEOPLE = [];      // every known person (tag suggestion chips, independen
 
 function toast(msg, bad){ const t=$('toast'); t.textContent=msg; t.className='toast show'+(bad?' bad':''); clearTimeout(t._t); t._t=setTimeout(()=>t.className='toast',2200); }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Return to the live page via history Back when we came from it, so it restores from bfcache
+// (instant, no cold reload) instead of a fresh forward load. Fall back to a normal nav otherwise.
+function backToLive(){
+  try { const r = document.referrer && new URL(document.referrer);
+    if (history.length > 1 && r && r.origin === location.origin && r.pathname === '/') return history.back();
+  } catch {}
+  location.href = '/';
+}
 // Disable a button + show a spinner while its async action runs; ignore repeat clicks; re-enable on finish.
 function withBusy(btn, fn){
   if (!btn || btn.dataset.busy) return;
