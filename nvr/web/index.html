@@ -3,50 +3,55 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
-<meta name="theme-color" content="#080b0f">
+<meta name="theme-color" content="#0c1312">
 <title>Guttedar Nilaya</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 :root{
-  /* instrument palette: a calm near-black deck; saturated colour reserved for the data on the timeline */
-  --bg:#080b0f; --bg2:#0c1117;
-  --panel:#111720; --panel2:#171e28; --elev:#212b37;
-  --line:rgba(255,255,255,.07); --line2:rgba(255,255,255,.14);
-  --text:#eef3f8; --muted:#97a3b1; --faint:#5f6b78;
-  --rec:#3f8cff; --card:#f5a524; --off:#6b2630;
-  --live:#ff3b4e; --ok:#2fd27a; --warn:#f5a524;
-  --glow:rgba(63,140,255,.5);
+  /* Guttedar design system — deep petrol-green night; amber is the one brand accent (actions, live,
+     selection); the timeline keeps a small reserved legend of saturated data colours. */
+  --bg:#0c1312; --bg2:#090f0e;
+  --panel:#121b19; --panel2:#182320; --elev:#1f2c27;
+  --line:rgba(236,224,205,.08); --line2:rgba(236,224,205,.17);
+  --text:#edf1ea; --muted:#99a69c; --faint:#5f6c63;
+  /* the one bold colour, used only where it means something */
+  --amber:#f0a83a; --amber-deep:#c6831f; --amber-ink:#241704; --amber-glow:rgba(240,168,58,.16);
+  --rust:#d2705a;                                   /* destructive only */
+  /* timeline data legend (reserved for the recorded-coverage bar) */
+  --rec:#5aa0d8; --card:#e0932f; --off:#6b2b30;
+  --live:#ff4155; --ok:#6fcaa0; --warn:#f0a83a;
+  --glow:rgba(240,168,58,.22);
   --radius:16px; --radius-sm:11px;
   --ring:0 0 0 1px var(--line);
-  --lift:0 1px 0 rgba(255,255,255,.045) inset;
-  --shadow:0 18px 48px -28px rgba(0,0,0,.9);
+  --lift:0 1px 0 rgba(236,224,205,.04) inset;
+  --shadow:0 20px 50px -30px rgba(0,0,0,.92);
   color-scheme:dark;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--text);
-  font:15px/1.5 "IBM Plex Sans",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  font:15px/1.5 "Hanken Grotesk",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
   -webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility;-webkit-tap-highlight-color:transparent}
 body{min-height:100dvh;
   background:
-    radial-gradient(120% 56% at 50% -8%,rgba(63,140,255,.07),transparent 60%),
-    radial-gradient(140% 80% at 50% -4%,#141c27 0%,var(--bg) 54%);
+    radial-gradient(120% 56% at 50% -8%,rgba(240,168,58,.05),transparent 60%),
+    radial-gradient(140% 80% at 50% -4%,#121b19 0%,var(--bg) 54%);
   background-attachment:fixed}
-.mono{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;font-variant-numeric:tabular-nums;font-feature-settings:"tnum","zero"}
+.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;font-feature-settings:"tnum","zero"}
 button{font:inherit;font-weight:500;color:var(--text);background:var(--panel2);border:1px solid var(--line);
   border-radius:var(--radius-sm);padding:0 15px;min-height:44px;cursor:pointer;touch-action:manipulation;
   display:inline-flex;align-items:center;justify-content:center;gap:7px;box-shadow:var(--lift);
   transition:background .16s ease,border-color .16s ease,color .16s ease,box-shadow .16s ease,transform .05s ease}
 button:hover{background:var(--elev);border-color:var(--line2)}
 button:active{transform:scale(.975)}
-button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--rec)}
+button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--amber)}
 button[disabled]{opacity:.34;cursor:default;pointer-events:none;box-shadow:none}
 [hidden]{display:none!important}
 .app{max-width:1060px;margin:0 auto;padding:18px 16px calc(22px + env(safe-area-inset-bottom))}
 /* header */
 header{display:flex;align-items:center;gap:12px;margin-bottom:16px;padding:0 2px}
-header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+header h1{font-family:"Bricolage Grotesque",serif;font-size:20px;font-weight:700;letter-spacing:-.02em;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dot{position:relative;width:9px;height:9px;border-radius:50%;background:var(--faint);flex:none;box-shadow:0 0 0 4px rgba(255,255,255,.025)}
 .dot.ok{background:var(--ok);box-shadow:0 0 0 4px rgba(47,210,122,.14),0 0 12px rgba(47,210,122,.5)}
 .dot.bad{background:var(--live);box-shadow:0 0 0 4px rgba(255,59,78,.16),0 0 12px rgba(255,59,78,.55)}
@@ -64,7 +69,7 @@ header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1;w
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.1);
   padding:6px 11px;border-radius:999px;font-size:12.5px;font-weight:600;line-height:1;
   font-variant-numeric:tabular-nums;letter-spacing:.2px}
-#clock{font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:13px;letter-spacing:.4px}
+#clock{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;letter-spacing:.4px}
 .pill.live{background:var(--live);color:#fff;display:inline-flex;align-items:center;gap:6px;letter-spacing:.8px;
   box-shadow:inset 0 0 0 1px rgba(255,255,255,.18),0 2px 12px -2px rgba(255,59,78,.6)}
 .pill.live::before{content:"";width:7px;height:7px;border-radius:50%;background:#fff;box-shadow:0 0 6px #fff;animation:pulse 1.6s ease-in-out infinite}
@@ -89,8 +94,8 @@ header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1;w
 .seg button{border:0;border-radius:0;background:transparent;min-height:44px;padding:0 14px;font-weight:600;color:var(--muted);box-shadow:none}
 .seg button+button{border-left:1px solid var(--line)}
 .seg button:hover{background:var(--elev);color:var(--text)}
-.seg button.on,.seg button.on:hover{background:var(--rec);color:#05101f;box-shadow:inset 0 1px 0 rgba(255,255,255,.3),inset 0 -2px 6px rgba(0,0,0,.2)}
-.seg button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--rec)}
+.seg button.on,.seg button.on:hover{background:var(--amber);color:var(--amber-ink);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),inset 0 -2px 6px rgba(0,0,0,.2)}
+.seg button:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--amber)}
 /* timeline */
 .tl{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:var(--radius);
   padding:14px 16px 16px;box-shadow:var(--lift),var(--shadow)}
@@ -98,7 +103,7 @@ header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1;w
 .tlhead .day{flex:1;text-align:center;font-weight:600;font-size:13.5px;min-width:80px;letter-spacing:.2px;font-variant-numeric:tabular-nums;cursor:pointer;user-select:none}
 .tlhead .icon{width:44px;font-size:20px;line-height:1}
 .bar{position:relative;height:56px;touch-action:none;cursor:pointer;user-select:none;
-  background:linear-gradient(180deg,#070a0e,#05080b);border-radius:10px}
+  background:linear-gradient(180deg,#0a100e,#070c0a);border-radius:10px}
 .bar canvas{width:100%;height:100%;display:block;border-radius:10px}
 .bar::after{content:"";position:absolute;inset:0;border-radius:10px;pointer-events:none;
   box-shadow:inset 0 0 0 1px var(--line),inset 0 1px 0 rgba(255,255,255,.05),inset 0 2px 6px rgba(0,0,0,.6)}
@@ -112,14 +117,14 @@ header h1{font-size:17px;font-weight:600;letter-spacing:-.01em;margin:0;flex:1;w
 .dbg{margin-top:14px;background:var(--panel);border:1px dashed var(--line2);border-radius:var(--radius);padding:12px 15px;font-size:13px;color:var(--muted)}
 .dbg b{color:var(--text)}
 .dbg>button{float:right;padding:0 11px;min-height:32px;font-size:12px}
-.dbg ol{margin:8px 0 0;padding-left:20px;font-family:"IBM Plex Mono",ui-monospace,monospace;font-size:12px;font-variant-numeric:tabular-nums;line-height:1.65}
+.dbg ol{margin:8px 0 0;padding-left:20px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-variant-numeric:tabular-nums;line-height:1.65}
 /* login */
 .login{position:fixed;inset:0;z-index:200;display:grid;place-items:center;
   background:
-    radial-gradient(120% 56% at 50% -2%,rgba(63,140,255,.1),transparent 60%),
-    radial-gradient(130% 85% at 50% 0%,#141c27,var(--bg));padding:24px}
+    radial-gradient(120% 56% at 50% -2%,rgba(240,168,58,.08),transparent 60%),
+    radial-gradient(130% 85% at 50% 0%,#121b19,var(--bg));padding:24px}
 .login-card{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:340px;text-align:center}
-.login-card h1{margin:10px 0 0;font-size:23px;font-weight:600;letter-spacing:-.01em}
+.login-card h1{font-family:"Bricolage Grotesque",serif;margin:10px 0 0;font-size:25px;font-weight:700;letter-spacing:-.02em}
 .login-card p{margin:0 0 16px;color:var(--muted)}
 .gbtn{display:flex;align-items:center;gap:10px;justify-content:center;width:100%;min-height:48px;background:#fff;color:#1f1f1f;border:0;font-weight:600;box-shadow:0 8px 28px -12px rgba(0,0,0,.8)}
 .gbtn:hover{background:#f1f1f1}
@@ -204,7 +209,7 @@ dialog .close button{width:100%}
 
 <div class="login" id="login">
   <div class="login-card" id="loginCard" hidden>
-    <svg width="48" height="48" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#ff445a"/><circle cx="12" cy="12" r="3.2" fill="#fff"/></svg>
+    <svg width="48" height="48" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9" fill="#f0a83a"/><circle cx="12" cy="12" r="3.2" fill="#0c1312"/></svg>
     <h1>Guttedar Nilaya</h1>
     <p>Sign in to see the camera.</p>
     <button class="gbtn" id="gSignIn" type="button"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.6 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.7 6c4.5-4.2 6.9-10.3 6.9-17.7z"/><path fill="#FBBC05" d="M10.5 28.7a14.5 14.5 0 010-9.4l-7.9-6.1a24 24 0 000 21.6l7.9-6.1z"/><path fill="#34A853" d="M24 48c6.5 0 11.9-2.1 15.9-5.8l-7.7-6c-2.1 1.4-4.9 2.3-8.2 2.3-6.3 0-11.6-4.1-13.5-9.8l-7.9 6.1C6.5 42.6 14.6 48 24 48z"/></svg>Sign in with Google</button>
@@ -447,7 +452,7 @@ function draw() {
   cv.width = w * dpr; cv.height = h * dpr;
   const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, w, h);
   const [a, b] = view(), x = t => (t - a) / (b - a) * w;
-  g.fillStyle = '#141b24'; g.fillRect(0, 14, w, 24);
+  g.fillStyle = '#0f1715'; g.fillRect(0, 14, w, 24);
   const css = getComputedStyle(document.body), paint = (list, color, y = 14, hgt = 24) => {
     g.fillStyle = css.getPropertyValue(color);
     // coalesce into pixel runs: many sub-pixel segments would otherwise each draw at a 1px
@@ -466,10 +471,10 @@ function draw() {
   paint(st.card, '--card');                                        // highlight, on top, the parts filled from the SD card
   // future: hatched
   const n = now();
-  if (n < b) { g.fillStyle = '#0a0e13'; g.fillRect(x(n), 14, w - x(n), 24); }
+  if (n < b) { g.fillStyle = '#0a100e'; g.fillRect(x(n), 14, w - x(n), 24); }
   // ticks
   const step = { 24: 3 * 3600, 6: 3600, 1: 600, 0.25: 120, 0.0833: 60 }[st.zoom];
-  g.fillStyle = '#7e8b99'; g.font = '11px "IBM Plex Mono", ui-monospace, monospace'; g.textAlign = 'center';
+  g.fillStyle = '#99a69c'; g.font = '11px ui-monospace, SFMono-Regular, Menlo, monospace'; g.textAlign = 'center';
   let lastLabel = -1e9;
   for (let t = Math.ceil(a / step) * step; t <= b; t += step) {
     const xt = x(t);
@@ -482,7 +487,7 @@ function draw() {
   // playhead
   const p = st.wall;
   if (p && p >= a && p <= b) {
-    g.fillStyle = st.mode === 'vod' ? '#ffffff' : '#ff3b4e';
+    g.fillStyle = st.mode === 'vod' ? '#ffffff' : '#f0a83a';
     g.fillRect(x(p) - 1, 8, 2, 36);
     g.beginPath(); g.arc(x(p), 8, 6, 0, 7); g.fill();
     g.strokeStyle = 'rgba(0,0,0,.35)'; g.lineWidth = 1.5; g.stroke();
