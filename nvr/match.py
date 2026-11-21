@@ -139,17 +139,21 @@ def reject(cur, detection_id):
 
 
 def unassign(cur, detection_id):
-    """Remove ONE detection from whatever identity it's on, back to the unknown pool (identity_id NULL,
-    confirmed 0) — used when the user prunes a wrong crop from a tagged person. Clears confirmed too, so
-    it also works on a detection that a group tag had confirmed. A later rematch() only re-adds it if its
-    embedding is actually within the re-ID threshold of the person's remaining crops (i.e. it really is
-    them); a genuinely wrong crop stays out.
+    """Remove ONE detection from whatever identity it's on — used when the user prunes a wrong crop from a
+    tagged person. The removal must STICK even when the crop genuinely resembles that person: a wrong match
+    happens precisely because the crop is within the re-ID threshold of the person's centroid, so leaving it
+    confirmed=0 would let the immediately-following rematch() re-claim it to the very same person (the "I
+    removed it but it came back, count's 2 again" bug). So we mark it confirmed=1 with identity_id=NULL: a
+    user-asserted "this is an unknown, do not auto-assign it". rematch() only re-evaluates confirmed=0 rows,
+    so it never touches this one; rebuild_protos() only reads confirmed=1 rows that HAVE an identity, so a
+    confirmed-but-unidentified row seeds no gallery. The crop drops back into the Unknown pool where it can
+    be dismissed or tagged correctly.
 
     Also DETACH it into its own cluster (cluster_id = id): it no longer shares the old group's cluster_id,
     so re-tagging this one crop to another person can't drag its former cluster-mates with it. The next
     _cluster() pass re-groups it among the unknowns by embedding."""
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'remove')", [detection_id])
-    cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 0, cluster_id = id WHERE id = :1",
+    cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 1, cluster_id = id WHERE id = :1",
                 [detection_id])
 
 
