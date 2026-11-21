@@ -722,6 +722,33 @@ window.startApp = async () => {
     loadSpans(); goLive();
   }
 };
+
+/* ===================== bfcache: park on leave, rejoin live on return =====================
+   Switching to /people loads a separate document, which freezes this one. An open WebSocket
+   would make this page bfcache-ineligible and force a full cold reload on return — exactly the
+   thing we want to avoid. So on pagehide we PARK the live stream: close the browser's relay
+   socket and stop the hls loader, while leaving the page state and last video frame intact so
+   bfcache can restore them instantly. The server-side camera relay keeps running regardless —
+   it is never dropped — so on a bfcache restore we REUSE it by jumping straight to the live edge
+   (the latest mark) via goLive(), rather than resuming a now-stale frozen frame. A recording
+   (vod) view holds no socket, so we leave it alone and let bfcache restore its exact position. */
+let PARKED = false;
+const wasLive = () => st.mode === 'live' || st.mode === 'hlslive';
+window.addEventListener('pagehide', () => {
+  PARKED = wasLive();
+  if (!PARKED) return;                              // vod/nothing: no socket to park
+  const rt = st.rt;
+  if (rt) {                                         // 'live' (WebSocket relay)
+    if (rt.ws) { rt.ws.onclose = null; try { rt.ws.close(); } catch {} }  // null onclose so retry() can't fire
+    clearInterval(rt.timer);
+  }
+  if (st.hls) { try { st.hls.stopLoad(); } catch {} }   // 'hlslive': stop fetching so it can bfcache too
+});
+window.addEventListener('pageshow', e => {
+  if (!e.persisted) return;                         // a fresh (non-bfcache) load boots normally
+  if (PARKED) { PARKED = false; st.day = dayKey(now()); st.center = now(); goLive(); }  // reconnect at the latest mark
+  loadSpans();                                      // refresh the coverage bar
+});
 </script>
 <script type="module">
 // Google sign-in (Firebase). signin.js turns it into the session cookie nginx checks.
