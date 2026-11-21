@@ -36,6 +36,10 @@ button{font:inherit;font-weight:500;color:var(--text);background:var(--panel2);b
 button:hover{background:var(--elev);border-color:var(--line2)}
 button:active{transform:scale(.975)}
 button:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--amber)}
+button:disabled{opacity:.5;cursor:default}
+button.busy{position:relative;pointer-events:none;color:transparent!important}
+button.busy::after{content:"";position:absolute;inset:0;margin:auto;width:15px;height:15px;
+  border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:s .8s linear infinite}
 [hidden]{display:none!important}
 a{color:var(--amber);text-decoration:none}
 .app{max-width:1060px;margin:0 auto;padding:16px 16px calc(28px + env(safe-area-inset-bottom))}
@@ -202,6 +206,15 @@ let ALLPEOPLE = [];      // every known person (tag suggestion chips, independen
 
 function toast(msg, bad){ const t=$('toast'); t.textContent=msg; t.className='toast show'+(bad?' bad':''); clearTimeout(t._t); t._t=setTimeout(()=>t.className='toast',2200); }
 const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+// Disable a button + show a spinner while its async action runs; ignore repeat clicks; re-enable on finish.
+function withBusy(btn, fn){
+  if (!btn || btn.dataset.busy) return;
+  btn.dataset.busy = '1'; btn.disabled = true; btn.classList.add('busy');
+  return Promise.resolve().then(fn).finally(() => {
+    delete btn.dataset.busy;
+    if (btn.isConnected){ btn.disabled = false; btn.classList.remove('busy'); }  // sheet may have closed
+  });
+}
 const cropUrl = id => `/detapi/crop/${id}.jpg`;
 const hideBroken = img => { img.onerror = () => { const t=img.closest('.thumb,.card'); if(t) t.remove(); }; };
 // all times are rendered in the viewer's own timezone
@@ -345,8 +358,8 @@ function openMultiTag(ids){
     </div>`;
   setTimeout(() => $('nm').focus(), 50);
   const go = () => assignMany(ids, $('nm').value);
-  $('mtag').onclick = go;
-  $('nm').addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  $('mtag').onclick = e => withBusy(e.currentTarget, go);
+  $('nm').addEventListener('keydown', e => { if (e.key === 'Enter') $('mtag').click(); });
   document.querySelectorAll('.sheet .chip').forEach(c =>
     c.addEventListener('click', () => { const i = $('nm'); i.value = c.dataset.name; i.focus(); }));
 }
@@ -437,7 +450,7 @@ async function openDetail(o){
   }
   draw(); upd();
 
-  $('save').onclick = async () => {
+  $('save').onclick = e => withBusy(e.currentTarget, async () => {
     const name = $('nm').value.trim();
     if(!name){ toast('Enter a name', true); return; }
     try{
@@ -445,29 +458,29 @@ async function openDetail(o){
       else { const r = await api.post('/detapi/tag', {id:o.id, name}); toast(`Tagged ${name}${r.rematched?` · ${r.rematched} re-matched`:''}`); }
       DIRTY = true; closeSheet();
     }catch(e){ toast(e==='auth'?'Sign in first':'Save failed', true); }
-  };
+  });
   $('nm').addEventListener('keydown', e => { if(e.key==='Enter') $('save').click(); });
 
-  $('premove').onclick = async () => {
+  $('premove').onclick = e => withBusy(e.currentTarget, async () => {
     const ids = [...RM]; if(!ids.length) return;
     try{ await api.post('/detapi/unassign', {ids});
       for(const id of ids){ const i = dets.findIndex(d => d.id===id); if(i>=0) dets.splice(i,1); }
       RM.clear(); draw(); upd(); DIRTY = true;       // keep the sheet open so you can still tag the rest
       toast(`Removed ${ids.length}`);
     }catch(e){ toast(e==='auth'?'Sign in first':'Remove failed', true); }
-  };
+  });
 
-  if (!isP) $('pdismiss').onclick = async () => {
+  if (!isP) $('pdismiss').onclick = e => withBusy(e.currentTarget, async () => {
     try{ await api.post('/detapi/reject', {id:o.id}); DIRTY = true; closeSheet(); toast('Dismissed'); }
     catch(e){ toast(e==='auth'?'Sign in first':'Failed', true); }
-  };
+  });
 }
 
 $('refresh').onclick = load;
 $('selbtn').onclick = () => SEL ? exitSelect() : enterSelect();
 $('ab-cancel').onclick = exitSelect;
 $('ab-tag').onclick = () => { if (SEL && SEL.size) openMultiTag([...SEL]); };
-$('ab-rej').onclick = () => { if (SEL && SEL.size) dismissMany([...SEL]); };
+$('ab-rej').onclick = e => { if (SEL && SEL.size) withBusy(e.currentTarget, () => dismissMany([...SEL])); };
 // date navigation
 $('pPrev').onclick = () => setDay(dayKey(dayStart(DAY) - 43200));
 $('pNext').onclick = () => setDay(dayKey(dayStart(DAY) + 129600));
