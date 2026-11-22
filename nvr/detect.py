@@ -38,10 +38,16 @@ _STD = np.array([0.229, 0.224, 0.225], np.float32)
 _yolox = _osnet = None
 
 
-def session(path, threads=1):
-    """A CPU session pinned to a small thread count — this box has 2 cores and little RAM."""
+# Intra-op threads for CPU inference. Defaults to all cores: on the dedicated detect box (2 cores) that
+# lets one YOLOX/OSNet call use both, roughly halving per-segment inference wall-time so a higher live
+# sample rate keeps up. Set DET_THREADS=1 when detection shares a box with the recorder (the old setup).
+DET_THREADS = int(os.environ.get("DET_THREADS", str(os.cpu_count() or 1)))
+
+
+def session(path, threads=None):
+    """A CPU inference session using DET_THREADS intra-op threads (all cores by default)."""
     so = ort.SessionOptions()
-    so.intra_op_num_threads = threads
+    so.intra_op_num_threads = threads or DET_THREADS
     so.inter_op_num_threads = 1
     return ort.InferenceSession(path, so, providers=["CPUExecutionProvider"])
 
