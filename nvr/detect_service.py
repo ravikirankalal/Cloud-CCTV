@@ -276,26 +276,45 @@ class Tracker:
             self.finalize(tr["obs"], tr["obs"][0][0], tr["obs"][-1][0])
 
 
+def _reid_vec(nvr, ts, seg_id, box, pres_wh):
+    """Resolve the best shot's (frame, seg_id, box, embedding) for one track: HD when the re-ID stream
+    covers ts, else the SD frame. A decode that comes back EMPTY (under memory pressure ffmpeg can yield 0
+    bytes) falls back to the SD best shot rather than losing the sighting. Returns (None, ...) only when
+    nothing decodes. NEVER raises except on an Oracle error from embed's caller — decode/embed failures are
+    swallowed here so one bad frame can't abort the tracker's tick and strand every other open track."""
+    try:
+        rframe, rseg, rboxes = _reid_boxes(nvr, ts, [box], pres_wh) if pres_wh else (None, None, None)
+        if rframe is not None:
+            return rframe, rseg, rboxes[0], detect.embed(rframe, [rboxes[0]])[0]
+    except Exception as e:
+        print(f"  track re-ID HD decode failed ({e}); SD fallback", flush=True)
+    try:                                                  # HD gap OR HD decode failed: SD best shot
+        rframe = _decode_at(nvr, seg_id, ts)
+        if rframe is not None:
+            return rframe, seg_id, box, detect.embed(rframe, [box])[0]
+    except Exception as e:
+        print(f"  track re-ID SD decode failed ({e}); dropping track", flush=True)
+    return None, None, None, None
+
+
 def make_finalize(nvr_h, cur, pres_wh_box, stats):
     """Build the Tracker finalize callback: pick the track's best shot, decode HD once there (SD fallback
-    on a gap), embed, insert one detection spanning [s0, s1], and save its crop. nvr_h[0] is the current
-    segment-DB handle (a holder, since remote mode reopens the snapshot each batch); pres_wh_box[0] is the
-    current presence-frame size (constant for SD); stats['n'] counts emitted detections for the batch log."""
+    on a gap OR a failed HD decode), embed, insert one detection spanning [s0, s1], and save its crop.
+    nvr_h[0] is the current segment-DB handle (a holder, since remote mode reopens the snapshot each batch);
+    pres_wh_box[0] is the current presence-frame size (constant for SD); stats['n'] counts emitted
+    detections for the batch log. finalize never raises on a decode failure (see _reid_vec), so a single
+    bad frame can't wedge the tracker into re-decoding the same shot on every following segment."""
     def finalize(obs, s0, s1):
         nvr = nvr_h[0]
         ts, seg_id, box, score = max(obs, key=lambda o: _quality(o[2], o[3]))
-        pres_wh = pres_wh_box[0]
-        rframe, rseg, rboxes = _reid_boxes(nvr, ts, [box], pres_wh) if pres_wh else (None, None, None)
-        if rframe is None:                                # no HD there: re-ID on the SD best shot
-            rframe = _decode_at(nvr, seg_id, ts)
-            if rframe is None:
-                return
-            rseg, rbox = seg_id, box
-        else:
-            rbox = rboxes[0]
-        ev = detect.embed(rframe, [rbox])[0]
-        did = _insert_detection(cur, ts, rseg, rbox, score, ev, s0, s1)
-        _save_crop(rframe, rbox, did)
+        rframe, rseg, rbox, ev = _reid_vec(nvr, ts, seg_id, box, pres_wh_box[0])
+        if rframe is None:
+            return
+        did = _insert_detection(cur, ts, rseg, rbox, score, ev, s0, s1)   # DB error propagates -> reconnect
+        try:
+            _save_crop(rframe, rbox, did)
+        except Exception as e:
+            print(f"  crop save failed for det {did} ({e})", flush=True)
         stats["n"] += 1
     return finalize
 
