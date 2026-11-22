@@ -125,6 +125,14 @@ def segments(stream, t0, t1):
                          "AND start+dur>? ORDER BY start", (stream, t0 - MAX_SEG, t1, t0)).fetchall()
 
 
+def cov_segments(stream, t0, t1):
+    """Coverage only needs start/dur/run (spans + offline); skipping path/init halves the per-row
+    fetch cost over a full day (~9.7k rows)."""
+    with db() as c:
+        return c.execute("SELECT start, dur, run FROM segments WHERE stream=? AND start>? AND start<? "
+                         "AND start+dur>? ORDER BY start", (stream, t0 - MAX_SEG, t1, t0)).fetchall()
+
+
 def playlist(rows, live=False, seq=0, dseq=0):
     tgt = max([math.ceil(r["dur"]) for r in rows] + [LIVE_TARGET if live else 10])
     out = ["#EXTM3U", "#EXT-X-VERSION:7", f"#EXT-X-TARGETDURATION:{tgt}", "#EXT-X-INDEPENDENT-SEGMENTS"]
@@ -232,7 +240,7 @@ class H(BaseHTTPRequestHandler):
                 return self.send(200, json.dumps([{"id": k, "name": v} for k, v in STREAMS.items()]))
             if u.path == "/api/coverage":
                 s, t0, t1 = self.args(q, limit=40 * 86400)
-                rows = segments(s, t0, t1)
+                rows = cov_segments(s, t0, t1)
                 return self.send(200, json.dumps({"spans": spans(rows),
                                                   "card": spans([r for r in rows if r["run"] > CARD_RUN]),
                                                   "offline": offline(s, t0, t1, rows)}))
