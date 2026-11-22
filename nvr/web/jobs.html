@@ -8,6 +8,12 @@
 <link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="/assets/icon.svg">
 <link rel="manifest" href="/assets/site.webmanifest">
+<meta name="description" content="Background jobs and service status for the Guttedar Nilaya NVR.">
+<meta name="color-scheme" content="dark">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Guttedar">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -72,6 +78,9 @@ header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2p
 .log .t{color:var(--faint)}
 .log.tail{max-height:none;color:var(--muted)}
 .foot{color:var(--faint);font-size:12px;text-align:center;margin:18px 2px 0;font-variant-numeric:tabular-nums}
+@media (prefers-reduced-motion:reduce){
+  *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
+}
 </style>
 </head>
 <body>
