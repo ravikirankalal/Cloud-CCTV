@@ -751,6 +751,9 @@ window.startApp = async () => {
   // deep-link: /?t=<epoch> (e.g. from a People sighting) opens that moment's recording instead of live
   let jumpT = null;
   try { const v = +new URLSearchParams(location.search).get('t'); if (v > 0) jumpT = v; } catch {}
+  // Back from People (when bfcache missed and this is a cold load) carries its target in seekTo, not the URL
+  if (!jumpT) { try { const v = +sessionStorage.getItem('seekTo'); if (v > 0) jumpT = v; } catch {} }
+  try { sessionStorage.removeItem('seekTo'); } catch {}
   if (jumpT && jumpT <= now() - 20) {
     st.day = dayKey(jumpT); st.center = jumpT;
     await loadSpans();                 // playAt needs st.spans for the target day
@@ -783,6 +786,13 @@ window.addEventListener('pagehide', () => {
 });
 window.addEventListener('pageshow', e => {
   if (!e.persisted) return;                         // a fresh (non-bfcache) load boots normally
+  let seek = null;                                  // a People "watch at this moment" tap, carried via Back
+  try { const v = +sessionStorage.getItem('seekTo'); sessionStorage.removeItem('seekTo'); if (v > 0) seek = v; } catch {}
+  if (seek && seek <= now() - 20) {                 // seek the restored page in place instead of rejoining live
+    PARKED = false; st.day = dayKey(seek); st.center = seek;
+    loadSpans().then(() => playAt(seek));
+    return;
+  }
   if (PARKED) { PARKED = false; st.day = dayKey(now()); st.center = now(); goLive(); }  // reconnect at the latest mark
   loadSpans();                                      // refresh the coverage bar
 });
