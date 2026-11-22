@@ -1,0 +1,19 @@
+[Unit]
+# Publishes a consistent, WAL-free snapshot of nvr.db (nvr-snap.db) for the remote detector on micro #2
+# to read over the NFS export — so detection runs off-box without SQLite-over-NFS (WAL/-shm) hazards.
+Description=NVR: periodic nvr.db snapshot for the remote detector
+After=nvr-recorder.service
+Wants=nvr-recorder.service
+
+[Service]
+User=ubuntu
+# never compete with recording for CPU or disk
+Nice=15
+IOSchedulingClass=idle
+Environment=SNAP_INTERVAL=15
+ExecStart=/bin/bash /home/ubuntu/nvr/snapshot.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,36 @@
+[Unit]
+# The detector running on its OWN box (micro #2), off the recording box. Segments come from the
+# recorder's NFS-exported tree (NVR_DATA) + a periodic consistent snapshot DB (NVR_DB_PATH, immutable);
+# crops + the motion-gate model are written LOCALLY (NVR_CROPS/NVR_BG). Detection is the primary
+# workload here, so it gets most of the box (unlike the co-located unit which must yield to recording).
+Description=NVR person detection (remote detector box)
+After=network-online.target
+Wants=network-online.target
+RequiresMountsFor=/mnt/nvr1
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nvr
+Environment=ADB_WALLET=/home/ubuntu/nvr/adb-wallet
+Environment=NVR_DATA=/mnt/nvr1
+Environment=NVR_DB_PATH=/mnt/nvr1/nvr-snap.db
+Environment=NVR_DB_IMMUTABLE=1
+Environment=NVR_CROPS=/home/ubuntu/nvr-data/crops
+Environment=NVR_BG=/home/ubuntu/nvr-data/detect_bg.npz
+Environment=NVR_DET_CONF=0.25
+Environment=NVR_STREAM=cam1-sd
+Environment=DET_REID_STREAM=cam1
+Environment=DET_STRIDE=1
+Environment=DET_TRACK=1
+Environment=DET_IDLE=5
+Environment=DET_TRACK_GAP=12
+ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_service.py run
+Restart=always
+RestartSec=10
+# dedicated box: give detection the room (still cap to leave the OS + API headroom on 952 MB)
+MemoryHigh=700M
+MemoryMax=820M
+
+[Install]
+WantedBy=multi-user.target
