@@ -1,0 +1,13 @@
+{
+  "name": "Guttedar Nilaya",
+  "short_name": "Guttedar",
+  "description": "Live view, recordings and people for the Guttedar Nilaya camera.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "theme_color": "#0c1312",
+  "background_color": "#0c1312",
+  "icons": [
+    { "src": "/assets/icon.svg", "type": "image/svg+xml", "sizes": "any", "purpose": "any maskable" }
+  ]
+}
