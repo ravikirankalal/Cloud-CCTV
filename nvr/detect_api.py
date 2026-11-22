@@ -168,6 +168,21 @@ def group(rep_id, frm=None, to=None):
     return {"grp": grp, "detections": dets}
 
 
+def det_times(frm, to, binw=30):
+    """Presence marks for the live-page timeline: the epoch bin-starts (binw-second buckets) in
+    [frm,to) that hold at least one real detection. Hidden ('not a person') crops are excluded;
+    unknown (identity NULL) and known people are kept. Binning bounds the payload to <=1 row per
+    bucket (~2880/day) so the query stays cheap and the JSON small."""
+    def q(cur):
+        cur.execute("""SELECT DISTINCT FLOOR(ts / :bw) * :bw b FROM detections
+                       WHERE ts >= :frm AND ts < :tto
+                         AND (identity_id IS NULL OR identity_id NOT IN
+                              (SELECT id FROM identities WHERE kind = 'hidden'))
+                       ORDER BY b""", {"bw": binw, "frm": frm, "tto": to})
+        return [int(r[0]) for r in cur.fetchall()]
+    return {"bins": db(q), "w": binw}
+
+
 def unassign(det_ids):
     def w(cur):
         for did in det_ids:
@@ -295,6 +310,11 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/detapi/group":
                 frm, to = _range(q)
                 return self.send(200, json.dumps(group(int(q["id"][0]), frm, to)))
+            if u.path == "/detapi/times":
+                frm, to = _range(q)
+                if frm is None:
+                    return self.err(400, "from/to required")
+                return self.send(200, json.dumps(det_times(frm, to)))
             if u.path.startswith("/detapi/crop/") and u.path.endswith(".jpg"):
                 det_id = int(u.path[len("/detapi/crop/"):-4])
                 p = crop_file(det_id)
