@@ -159,6 +159,7 @@ function vmCard(title, sub, d){
   const rows =
     `<div class="vmrow"><span>load</span><span><b class="${loadHot?'hot':''}">${l1!=null?l1.toFixed(2):'—'}</b> <span class="u">/ ${ncpu} cpu</span></span></div>`+
     `<div class="vmrow"><span>mem</span><span><b>${h.mem_used_mb??'—'}</b> <span class="u">/ ${h.mem_total_mb??'—'} MB</span></span></div>`+
+    `<div class="vmrow"><span>swap</span><span>${h.swap_total_mb?`<b>${h.swap_used_mb??'—'}</b> <span class="u">/ ${h.swap_total_mb} MB</span>`:`<span class="u">off</span>`}</span></div>`+
     `<div class="vmrow"><span>disk</span><span><b>${h.disk_used_gb??'—'}</b> <span class="u">/ ${h.disk_total_gb??'—'} GB</span></span></div>`+
     `<div class="vmrow"><span>uptime</span><span><b>${dur(h.uptime_s)}</b></span></div>`;
   const lag = det

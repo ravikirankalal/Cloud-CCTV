@@ -23,8 +23,10 @@ def host_stats(disk="/"):
                 mi[k] = int(v.split()[0])                      # kB
         total, avail = mi.get("MemTotal", 0), mi.get("MemAvailable", 0)
         s["mem_total_mb"], s["mem_used_mb"] = round(total / 1024), round((total - avail) / 1024)
+        sw_total, sw_free = mi.get("SwapTotal", 0), mi.get("SwapFree", 0)
+        s["swap_total_mb"], s["swap_used_mb"] = round(sw_total / 1024), round((sw_total - sw_free) / 1024)
     except Exception:
-        s["mem_total_mb"] = s["mem_used_mb"] = None
+        s["mem_total_mb"] = s["mem_used_mb"] = s["swap_total_mb"] = s["swap_used_mb"] = None
     try:
         v = os.statvfs(disk)
         tot, free = v.f_blocks * v.f_frsize, v.f_bavail * v.f_frsize
