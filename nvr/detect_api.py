@@ -14,12 +14,14 @@
 #   GET  /detapi/person?id=N            one identity's crops: {name, detections:[{id,ts,score}]}
 #   GET  /detapi/group?id=N             one unknown group's crops (N = a member): {grp, detections:[...]}
 #   GET  /detapi/crop/<id>.jpg          the person crop for one detection (decoded on demand, cached)
+#   GET  /detapi/stats                  detect VM: {host:{load,mem,disk,uptime}, detect:{cursor,lag_s,backlog}}
 #   POST /detapi/tag      {id|ids,name} name one/many groups -> known identity, then re-match history
 #   POST /detapi/reject   {id|ids}      mark one/many groups 'not a person' (hidden)
 #   POST /detapi/unassign {id|ids}      remove detection(s) from their identity, back to the unknown pool
 #   POST /detapi/rename   {id,name}     rename an identity (merges into an existing same-name person)
 import json
 import os
+import sqlite3
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +30,7 @@ from urllib.parse import urlparse, parse_qs
 import oracledb
 
 import adb
+import hoststat
 import match
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -36,6 +39,8 @@ PORT = int(os.environ.get("DETAPI_PORT", "3401"))
 HOST = os.environ.get("DETAPI_HOST", "127.0.0.1")  # 0.0.0.0 when nginx is on another box (remote detector)
 CROP_DIR = os.environ.get("NVR_CROPS") or os.path.join(DATA, "crops")  # static crops from detect_service
                                           # (NVR_CROPS must match the detector's when they share a box)
+SNAP_DB = os.environ.get("NVR_DB_PATH")               # static immutable snapshot, for the lag readout (optional)
+DET_STREAM = os.environ.get("NVR_STREAM", "cam1-sd")  # the presence stream the poller consumes
 UNKNOWN_LIMIT = 120
 
 os.makedirs(CROP_DIR, exist_ok=True)
@@ -270,6 +275,43 @@ def reject(det_ids):
     return db(w, write=True)
 
 
+def detect_lag():
+    """How far the poller is behind the recorder. The cursor (last processed seg) is read from Oracle;
+    the newest presence segment and the cursor's wall-clock come from the STATIC snapshot copy
+    (immutable, short timeout — never the live recorder DB, and never blocks the service). Every field is
+    guarded so NFS being away just yields nulls. lag_s is now minus the cursor segment's start."""
+    out = {"cursor": None, "newest_seg": None, "newest_start": None,
+           "lag_s": None, "backlog": None}
+    try:
+        def q(cur):
+            cur.execute("SELECT v FROM detect_state WHERE k = :1", ["last_seg_id"])
+            r = cur.fetchone()
+            return int(r[0]) if r else None
+        out["cursor"] = db(q)
+    except Exception:
+        pass
+    if SNAP_DB:
+        try:
+            c = sqlite3.connect(f"file:{SNAP_DB}?immutable=1", uri=True, timeout=3)
+            try:
+                r = c.execute("SELECT id, start FROM segments WHERE stream = ? ORDER BY id DESC LIMIT 1",
+                              (DET_STREAM,)).fetchone()
+                if r:
+                    out["newest_seg"], out["newest_start"] = int(r[0]), float(r[1])
+                if out["cursor"]:
+                    cr = c.execute("SELECT start FROM segments WHERE id = ?", (out["cursor"],)).fetchone()
+                    if cr:
+                        out["lag_s"] = round(time.time() - float(cr[0]))
+                    bl = c.execute("SELECT COUNT(*) FROM segments WHERE stream = ? AND id > ?",
+                                   (DET_STREAM, out["cursor"])).fetchone()
+                    out["backlog"] = int(bl[0]) if bl else None
+            finally:
+                c.close()
+        except Exception:
+            pass
+    return out
+
+
 class H(BaseHTTPRequestHandler):
     server_version = "nvr-detect-api"
 
@@ -317,6 +359,9 @@ class H(BaseHTTPRequestHandler):
                 if frm is None:
                     return self.err(400, "from/to required")
                 return self.send(200, json.dumps(det_times(frm, to)))
+            if u.path == "/detapi/stats":              # detect VM host stats + poller lag, for the dashboard
+                return self.send(200, json.dumps({"role": "detect",
+                                                  "host": hoststat.host_stats(), "detect": detect_lag()}))
             if u.path.startswith("/detapi/crop/") and u.path.endswith(".jpg"):
                 det_id = int(u.path[len("/detapi/crop/"):-4])
                 p = crop_file(det_id)
