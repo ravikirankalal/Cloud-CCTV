@@ -403,7 +403,7 @@ def run():
         print(f"presence on '{STREAM}', re-ID crops from '{REID_STREAM}' (HD decoded only on a hit)", flush=True)
     if TRACK:
         print(f"track mode ON: IoU>={TRACK_IOU}, close after {TRACK_GAP}s idle, chunk cap {TRACK_MAX}s "
-              f"(one HD re-ID per track)", flush=True)
+              f"(re-ID on {REID_STREAM or STREAM}, once per track)", flush=True)
     if DB_IMMUTABLE:
         print(f"remote mode: segments from snapshot '{DB_PATH}' (reopened each batch)", flush=True)
     while True:                                           # reconnect loop: a DB error drops to here
@@ -522,6 +522,64 @@ def backfill_crops():
     orc.close()
 
 
+def _sd_box(box_str, sd_wh):
+    """The stored box mapped to SD-frame px. A detection re-ID'd on HD stored an HD box (coords up to
+    2304x1296); one re-ID'd on SD already stored an SD box. Detect which by whether it fits the SD frame."""
+    b = [float(v) for v in box_str.split(",")]
+    sw, sh = sd_wh
+    if b[2] > sw or b[3] > sh:                             # stored in HD px -> scale down to SD
+        b = [b[0] * sw / 2304.0, b[1] * sh / 1296.0, b[2] * sw / 2304.0, b[3] * sh / 1296.0]
+    return b
+
+
+def reembed_sd():
+    """Re-crop + re-embed the detections whose re-ID landed on the drifting HD stream, using the ALIGNED
+    SD frame at their own ts instead. Only rows with a surviving cam1-sd segment covering ts are touched
+    (the rest predate the sub-stream and were HD-presence+HD-reID, already aligned). Identity labels,
+    ts and the presence span are preserved — only embedding, box, seg_id and the crop jpeg change — so a
+    person's tag survives; only the (previously wrong) crop and vector are corrected. Re-clusters the
+    unknowns at the end. Idempotent: re-running reprocesses from SD again to the same result."""
+    orc = adb.connect(); cur = orc.cursor(); nvr = ro_nvr()
+    span = nvr.execute("SELECT MIN(start), MAX(start) FROM segments WHERE stream = ?", (STREAM,)).fetchone()
+    if not span or span[0] is None:
+        print("no SD segments in the snapshot; nothing to re-embed", flush=True); return
+    sd_min, sd_max = float(span[0]), float(span[1])
+    cur.execute("SELECT id, ts, box, identity_id FROM detections WHERE ts BETWEEN :1 AND :2 ORDER BY id",
+                (sd_min, sd_max))
+    rows = cur.fetchall()
+    print(f"re-embed candidates with a surviving SD frame: {len(rows)}", flush=True)
+    done = skip = 0
+    for det_id, ts, box, ident in rows:
+        det_id, ts = int(det_id), float(ts)
+        if not box:
+            skip += 1; continue
+        seg = nvr.execute("SELECT id, start, dur, path, init FROM segments WHERE stream = ? AND start <= ? "
+                          "ORDER BY start DESC LIMIT 1", (STREAM, ts)).fetchone()
+        if not seg or (seg[2] and ts > float(seg[1]) + float(seg[2])):
+            skip += 1; continue                           # ts falls in an SD gap
+        sid, start, dur, path, init = seg
+        try:
+            frame = detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path),
+                                        max(0.0, ts - float(start)))
+            if frame is None or frame.size == 0:
+                skip += 1; continue
+            sbox = _sd_box(box, (frame.shape[1], frame.shape[0]))
+            ev = detect.embed(frame, [sbox])[0]
+            emb = array.array("f", [float(x) for x in ev])
+            cur.execute("UPDATE detections SET embedding = :1, box = :2, seg_id = :3 WHERE id = :4",
+                        (emb, ",".join(str(int(v)) for v in sbox), int(sid), det_id))
+            _save_crop(frame, sbox, det_id)
+            done += 1
+        except Exception as e:
+            print(f"  det {det_id} skip: {e}", flush=True); skip += 1
+        if (done + skip) % 50 == 0:
+            orc.commit(); print(f"  {done+skip}/{len(rows)} ({done} re-embedded)", flush=True)
+    orc.commit()
+    g = _cluster(cur); orc.commit()
+    print(f"re-embed done: {done} corrected, {skip} skipped; re-clustered unknowns into {g} group(s)", flush=True)
+    orc.close()
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "run":
         run()
@@ -529,6 +587,8 @@ if __name__ == "__main__":
         backfill(int(sys.argv[2]), int(sys.argv[3]))
     elif len(sys.argv) >= 2 and sys.argv[1] == "backfill-crops":
         backfill_crops()
+    elif len(sys.argv) >= 2 and sys.argv[1] == "reembed-sd":
+        reembed_sd()
     elif len(sys.argv) >= 2 and sys.argv[1] == "cluster":
         cluster_unknowns()
     else:
