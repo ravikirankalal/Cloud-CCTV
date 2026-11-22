@@ -14,7 +14,8 @@
 #   GET  /detapi/person?id=N            one identity's crops: {name, detections:[{id,ts,score}]}
 #   GET  /detapi/group?id=N             one unknown group's crops (N = a member): {grp, detections:[...]}
 #   GET  /detapi/crop/<id>.jpg          the person crop for one detection (decoded on demand, cached)
-#   GET  /detapi/stats                  detect VM: {host:{load,mem,disk,uptime}, detect:{cursor,lag_s,backlog}}
+#   GET  /detapi/stats                  detect VM: {host, detect:{cursor,lag_s,backlog}, services:[unit...]}
+#   GET  /detapi/jobs/logs?unit&n        full log tail for a detect-VM unit (nvr-detect / nvr-detect-api)
 #   POST /detapi/tag      {id|ids,name} name one/many groups -> known identity, then re-match history
 #   POST /detapi/reject   {id|ids}      mark one/many groups 'not a person' (hidden)
 #   POST /detapi/unassign {id|ids}      remove detection(s) from their identity, back to the unknown pool
@@ -31,6 +32,7 @@ import oracledb
 
 import adb
 import hoststat
+import jobstat
 import match
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -42,6 +44,10 @@ CROP_DIR = os.environ.get("NVR_CROPS") or os.path.join(DATA, "crops")  # static 
 SNAP_DB = os.environ.get("NVR_DB_PATH")               # static immutable snapshot, for the lag readout (optional)
 DET_STREAM = os.environ.get("NVR_STREAM", "cam1-sd")  # the presence stream the poller consumes
 UNKNOWN_LIMIT = 120
+
+# This box's (the detect VM's) own units, surfaced on the dashboard alongside the recorder VM's.
+DET_JOBS = [("nvr-detect", "Detection poller"), ("nvr-detect-api", "Detection API")]
+DET_UNITS = {u for u, _ in DET_JOBS}
 
 os.makedirs(CROP_DIR, exist_ok=True)
 
@@ -359,9 +365,16 @@ class H(BaseHTTPRequestHandler):
                 if frm is None:
                     return self.err(400, "from/to required")
                 return self.send(200, json.dumps(det_times(frm, to)))
-            if u.path == "/detapi/stats":              # detect VM host stats + poller lag, for the dashboard
+            if u.path == "/detapi/stats":              # detect VM host stats + poller lag + its units
                 return self.send(200, json.dumps({"role": "detect",
-                                                  "host": hoststat.host_stats(), "detect": detect_lag()}))
+                                                  "host": hoststat.host_stats(), "detect": detect_lag(),
+                                                  "services": [jobstat.job_status(un, DET_UNITS) for un, _ in DET_JOBS]}))
+            if u.path == "/detapi/jobs/logs":          # full log tail for a detect-VM unit (dashboard expand)
+                unit = q.get("unit", [""])[0]
+                if unit not in DET_UNITS:
+                    return self.err(400, "unknown unit")
+                n = max(1, min(int(q.get("n", ["300"])[0]), 1000))
+                return self.send(200, json.dumps({"unit": unit, "lines": jobstat.unit_logs(unit, DET_UNITS, n)}))
             if u.path.startswith("/detapi/crop/") and u.path.endswith(".jpg"):
                 det_id = int(u.path[len("/detapi/crop/"):-4])
                 p = crop_file(det_id)
