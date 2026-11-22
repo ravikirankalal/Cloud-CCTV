@@ -331,8 +331,14 @@ def _cluster(cur):
     embeddings (pure vector math): two detections within CLUSTER_DIST are linked, and the link is
     transitive, so a person drifting across poses/time collapses into ONE group even when the first
     and last frame aren't themselves within threshold. Group id = smallest member id. Returns the
-    number of groups. Light; safe to re-run."""
-    cur.execute("SELECT id, embedding FROM detections WHERE identity_id IS NULL ORDER BY id")
+    number of groups. Light; safe to re-run.
+
+    Only confirmed=0 unknowns are (re)grouped. A detection the user manually split out of a group
+    (match.unassign sets confirmed=1, cluster_id=id) is PINNED: it's excluded from the graph here and
+    keeps its own cluster_id, so the separation is remembered across every later pass instead of being
+    re-merged by embedding."""
+    cur.execute("SELECT id, embedding FROM detections WHERE identity_id IS NULL "
+                "AND (confirmed = 0 OR confirmed IS NULL) ORDER BY id")
     rows = cur.fetchall()
     if not rows:
         return 0
