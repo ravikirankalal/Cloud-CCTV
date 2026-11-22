@@ -149,22 +149,31 @@ def playlist(rows, live=False, seq=0, dseq=0):
 
 
 def offline(stream, t0, t1, rows):
-    """the parts of gaps gapfill.py found the camera didn't record (not on its card either)."""
+    """the parts of gaps gapfill.py found the camera didn't record (not on its card either).
+    rows (sorted by start) and gaps (sorted by gap_from) are swept together in a single pass, keeping
+    one forward-only row pointer: O(rows + gaps), not rows*gaps. The camera can flap hundreds of times
+    a day, so the old nested loop cost seconds (e.g. 9.6k rows * 500 gaps ~= 5M iterations ~= 6s) and
+    stalled the whole coverage response, since the cheap recorded/card spans ship in the same reply."""
     try:
         with db() as c:
             gaps = c.execute("SELECT gap_from, gap_to FROM fills WHERE stream=? AND status='camera_offline' "
-                             "AND gap_to>? AND gap_from<?", (stream, t0, t1)).fetchall()
+                             "AND gap_to>? AND gap_from<? ORDER BY gap_from", (stream, t0, t1)).fetchall()
     except sqlite3.OperationalError:  # no gap filler yet
         return []
     out = []
+    n = len(rows)
+    i = 0                                   # first row that may still overlap the current (or a later) gap
     for g0, g1 in gaps:
-        # minus what's recorded inside the gap (the card's part)
-        cur = g0
-        for r in rows:
-            s, e = r["start"], r["start"] + r["dur"]
-            if e <= cur or s >= g1:
+        # rows ending at/before this gap's start end before every later gap too: skip them for good
+        while i < n and rows[i]["start"] + rows[i]["dur"] <= g0:
+            i += 1
+        cur, j = g0, i
+        while j < n and rows[j]["start"] < g1:  # only rows that start before the gap ends can fill it
+            s = rows[j]["start"]; e = s + rows[j]["dur"]
+            j += 1
+            if e <= cur:
                 continue
-            if s > cur:
+            if s > cur:                     # uncovered sliver before this segment = offline
                 out.append([round(cur, 3), round(s, 3)])
             cur = max(cur, e)
         if cur < g1:
