@@ -26,7 +26,8 @@ Environment=DET_TRACK=1
 Environment=DET_IDLE=5
 Environment=DET_TRACK_GAP=12
 # Sample rate: fine at the live edge, coarse while catching up (a segment older than DET_BACKFILL_AGE s
-# is backfill). Keeps live presence resolution high without slowing down backlog recovery.
+# is backfill). DET_FPS>0 samples live footage at a target frames/sec (n = dur*FPS), overriding DET_FRAMES.
+Environment=DET_FPS=3
 Environment=DET_FRAMES=6
 Environment=DET_FRAMES_BACKFILL=1
 Environment=DET_BACKFILL_AGE=120

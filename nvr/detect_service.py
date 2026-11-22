@@ -21,6 +21,7 @@ REID_STREAM = os.environ.get("DET_REID_STREAM", "")      # re-ID source: "" = sa
                                                          # for the OSNet crop when SD presence finds a person
 STRIDE = int(os.environ.get("DET_STRIDE", "2"))          # sample every Nth segment
 FRAMES = int(os.environ.get("DET_FRAMES", "1"))          # frames/segment at the LIVE edge (evenly spaced)
+FPS = float(os.environ.get("DET_FPS", "0"))              # live target frames/SEC; >0 overrides FRAMES (n = dur*FPS)
 FRAMES_BACKFILL = int(os.environ.get("DET_FRAMES_BACKFILL", "1"))  # coarser rate while catching up on old footage
 BACKFILL_AGE = float(os.environ.get("DET_BACKFILL_AGE", "120"))    # a segment older than this (s) is backfill, not live
 BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop before committing/sleeping
@@ -130,15 +131,20 @@ def _presence(nvr, seg_id, gate=None):
     boxes, so a caller's tracker can advance its clock over empty footage.
 
     Sample rate adapts to how fresh the footage is: a LIVE segment (recorded within BACKFILL_AGE seconds)
-    gets DET_FRAMES frames for fine temporal resolution; an OLD segment (we're catching up on a backlog)
-    gets the coarser DET_FRAMES_BACKFILL so the poller drains fast and returns to live. With n>1 we sample
-    that many frames evenly across the segment (single ffmpeg pass; see detect.decode_frames). Each frame's
-    ts is its own wall-clock time (start + i*dur/n)."""
+    is sampled at DET_FPS frames/sec (n = round(dur*FPS)) when DET_FPS>0, else at a fixed DET_FRAMES/segment;
+    an OLD segment (we're catching up on a backlog) gets the coarser DET_FRAMES_BACKFILL so the poller drains
+    fast and returns to live. With n>1 we sample that many frames evenly across the segment (single ffmpeg
+    pass; see detect.decode_frames). Each frame's ts is its own wall-clock time (start + i*dur/n)."""
     row = nvr.execute("SELECT start, path, init, dur FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
         return None, None, []
     start, path, init, dur = row
-    n = FRAMES if (time.time() - float(start)) <= BACKFILL_AGE else FRAMES_BACKFILL
+    if time.time() - float(start) > BACKFILL_AGE:
+        n = FRAMES_BACKFILL                               # old footage: catch up cheap
+    elif FPS > 0 and dur:
+        n = max(1, round(float(dur) * FPS))               # live: sample at a target frames/sec
+    else:
+        n = FRAMES                                        # live: fixed frames/segment
     init_abs = os.path.join(DATA, init)
     frames = detect.decode_frames(init_abs, os.path.join(DATA, path), n, dur)
     pres_wh = detect._frame_dims(init_abs)
