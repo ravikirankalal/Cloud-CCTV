@@ -482,7 +482,16 @@ async function openDetail(o){
       const play = b.querySelector('.play');
       if(play) play.addEventListener('click', e => {         // jump to the recorded footage; don't toggle remove
         e.stopPropagation();
-        location.href = '/?t=' + play.dataset.t;              // same tab: the live page deep-links /?t=<epoch>
+        const t = play.dataset.t;
+        // Prefer Back when we came from the live page: it restores that page from bfcache and seeks
+        // in place (instant), instead of cold-reloading the whole live page. seekTo says where to jump.
+        try { const r = document.referrer && new URL(document.referrer);
+          if (history.length > 1 && r && r.origin === location.origin && r.pathname === '/') {
+            try { sessionStorage.setItem('seekTo', t); } catch {}
+            return history.back();
+          }
+        } catch {}
+        location.href = '/?t=' + t;                           // opened People directly: cold deep-link /?t=<epoch>
       });
       b.addEventListener('click', () => {
         const id = parseInt(b.dataset.id);
