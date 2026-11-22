@@ -31,6 +31,11 @@ BG_PATH = os.path.join(DATA, "detect_bg.npz")            # persisted motion-gate
 GATE_ENABLED = os.environ.get("DET_GATE", "1") != "0"    # skip YOLOX on empty (no-foreground) frames
 GATE_MIN_PX = int(os.environ.get("DET_GATE_MIN_PX", "140"))  # foreground blob px (160-wide grid) to trigger
 GATE_K = float(os.environ.get("DET_GATE_K", "2.5"))      # per-pixel std multiple for the background model
+TRACK = os.environ.get("DET_TRACK", "0") != "0"          # track-based re-ID: group a person's SD sightings,
+                                                         # then ONE HD decode+embed per track (not per frame)
+TRACK_IOU = float(os.environ.get("DET_TRACK_IOU", "0.3"))   # min IoU to link a box to an open track
+TRACK_GAP = float(os.environ.get("DET_TRACK_GAP", "8"))     # close a track after this many sec (processed-ts) of no obs
+TRACK_MAX = float(os.environ.get("DET_TRACK_MAX", "25"))    # emit a chunk at least this often during a long track
 
 os.makedirs(CROP_DIR, exist_ok=True)
 
@@ -105,56 +110,182 @@ def _reid_frame(nvr, ts):
     return int(sid), frame
 
 
-def process_segment(nvr, cur, seg_id, gate=None):
-    """Detect people in one presence segment's frame(s) and insert them, saving each one's crop while the
-    frame is in hand. Returns the number of people stored. DB errors propagate (to trigger a reconnect);
-    decode errors are the caller's to swallow.
-
-    PRESENCE vs RE-ID (DET_REID_STREAM): YOLOX presence runs on the sampled frame of this (presence)
-    segment — cheap when that is the low-res SD sub-stream. When DET_REID_STREAM is set, the OSNet re-ID
-    embedding + crop come from the full-res HD frame at the same wall-clock ts (box scaled SD->HD), and the
-    detection is stored against the HD seg_id so it still navigates to the HD footage. If HD has no frame
-    there (a gap), we re-ID on the presence frame and store its seg_id, so an SD-only sighting is still
-    kept. With DET_REID_STREAM empty the presence frame is also the re-ID frame (the original HD-only path).
-
-    The optional `gate` is a MotionGate: it is fed EVERY presence frame in order (to keep its background
-    model current) and, on a frame with no foreground blob, we skip the YOLOX + re-ID pass entirely.
+def _presence(nvr, seg_id, gate=None):
+    """Decode this presence segment's sampled frame(s), feed the motion gate, run YOLOX, and return the
+    per-frame person boxes (in presence-frame px) WITHOUT touching the re-ID stream or the DB. Returns
+    (seg_start, pres_wh, [(ts, frame, boxes), ...]); only frames with >=1 box are listed, but the gate
+    still sees every frame so its background model stays current. seg_start is returned even with no
+    boxes, so a caller's tracker can advance its clock over empty footage.
 
     With DET_FRAMES>1 we sample that many frames evenly across the segment (single ffmpeg pass; see
-    detect.decode_frames). Each detection's ts is the frame's own wall-clock time (start + i·dur/FRAMES)."""
+    detect.decode_frames). Each frame's ts is its own wall-clock time (start + i*dur/FRAMES)."""
     row = nvr.execute("SELECT start, path, init, dur FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
-        return 0
+        return None, None, []
     start, path, init, dur = row
     init_abs = os.path.join(DATA, init)
     frames = detect.decode_frames(init_abs, os.path.join(DATA, path), FRAMES, dur)
-    pres_wh = detect._frame_dims(init_abs) if REID_STREAM else None   # presence-frame size, for SD->HD scaling
-    stored = 0
+    pres_wh = detect._frame_dims(init_abs)
+    out = []
     for i, frame in enumerate(frames):
         if gate is not None and not gate.check(frame)[0]:
             continue                                      # empty scene: don't pay for YOLOX
         ts = float(start) + (i * float(dur) / FRAMES if dur and FRAMES > 1 else 0.0)
         boxes = detect.detect_in(frame)                   # YOLOX presence (on the SD frame when so configured)
-        if not boxes:
-            continue
-        rframe, rseg = frame, seg_id                      # re-ID frame/seg: the presence frame by default
-        rboxes = [b["box"] for b in boxes]
-        if REID_STREAM:
-            hd_seg, hd_frame = _reid_frame(nvr, ts)
-            if hd_frame is not None:                       # re-ID + crop from HD; else fall back to SD above
-                rframe, rseg = hd_frame, hd_seg
-                rboxes = [_scale_box(b["box"], pres_wh, (hd_frame.shape[1], hd_frame.shape[0])) for b in boxes]
+        if boxes:
+            out.append((ts, frame, boxes))
+    return float(start), pres_wh, out
+
+
+def _reid_boxes(nvr, ts, boxes, pres_wh):
+    """Resolve the re-ID target for presence `boxes` (presence px) at `ts`. Returns (hd_frame, hd_seg,
+    hd_boxes) when DET_REID_STREAM has footage covering ts (boxes scaled SD->HD), else (None, None, None)
+    so the caller re-IDs on the presence frame itself — the SD-only fallback the sub-stream exists for."""
+    if REID_STREAM:
+        hd_seg, hd_frame = _reid_frame(nvr, ts)
+        if hd_frame is not None:
+            rboxes = [_scale_box(b, pres_wh, (hd_frame.shape[1], hd_frame.shape[0])) for b in boxes]
+            return hd_frame, hd_seg, rboxes
+    return None, None, None
+
+
+def _insert_detection(cur, ts, seg_id, box, score, ev, ts_start, ts_end):
+    """Insert one detection row (the caller saves its crop) and return its id. Shared by the per-frame and
+    the track paths so the row shape — including the [ts_start, ts_end] presence span — stays identical.
+    ts is the representative/best-shot time to navigate to; the span is when the person was actually seen."""
+    emb = array.array("f", [float(x) for x in ev])
+    ident = match_known(cur, emb)
+    idv = cur.var(oracledb.NUMBER)
+    cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id, ts_start, ts_end)
+                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8) RETURNING id INTO :9""",
+                (ts, seg_id, ",".join(str(int(v)) for v in box),
+                 float(score), emb, ident, float(ts_start), float(ts_end), idv))
+    return int(idv.getvalue()[0])
+
+
+def process_segment(nvr, cur, seg_id, gate=None):
+    """Per-frame path (DET_TRACK off): detect people in one presence segment and insert one row each,
+    re-ID'd on the HD frame at the same ts when DET_REID_STREAM is set (box scaled SD->HD, stored against
+    the HD seg_id), else on the presence frame itself. Returns the number stored. DB errors propagate (to
+    trigger a reconnect); decode errors are the caller's to swallow."""
+    start, pres_wh, frames = _presence(nvr, seg_id, gate)
+    if start is None:
+        return 0
+    stored = 0
+    for ts, frame, boxes in frames:
+        sd_boxes = [b["box"] for b in boxes]
+        rframe, rseg, rboxes = _reid_boxes(nvr, ts, sd_boxes, pres_wh)
+        if rframe is None:                                # no HD there: re-ID on the presence frame
+            rframe, rseg, rboxes = frame, seg_id, sd_boxes
         for b, hbox, ev in zip(boxes, rboxes, detect.embed(rframe, rboxes)):
-            emb = array.array("f", [float(x) for x in ev])
-            ident = match_known(cur, emb)
-            idv = cur.var(oracledb.NUMBER)
-            cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id)
-                           VALUES (:1, :2, :3, :4, :5, :6) RETURNING id INTO :7""",
-                        (ts, rseg, ",".join(str(int(v)) for v in hbox),
-                         float(b["score"]), emb, ident, idv))
-            _save_crop(rframe, hbox, int(idv.getvalue()[0]))
+            did = _insert_detection(cur, ts, rseg, hbox, b["score"], ev, ts, ts)
+            _save_crop(rframe, hbox, did)
             stored += 1
     return stored
+
+
+# ---- track-based re-ID: group a person's SD sightings, decode HD once on the best shot ----
+def _decode_at(nvr, seg_id, ts):
+    """Decode the frame at wall-clock `ts` from a given segment (by id), or None if the segment is gone."""
+    r = nvr.execute("SELECT start, path, init FROM segments WHERE id = ?", (seg_id,)).fetchone()
+    if not r:
+        return None
+    start, path, init = r
+    return detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path), max(0.0, ts - float(start)))
+
+
+def _iou(a, b):
+    ix0, iy0, ix1, iy1 = max(a[0], b[0]), max(a[1], b[1]), min(a[2], b[2]), min(a[3], b[3])
+    iw, ih = max(0.0, ix1 - ix0), max(0.0, iy1 - iy0)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    ua = (a[2] - a[0]) * (a[3] - a[1]) + (b[2] - b[0]) * (b[3] - b[1]) - inter
+    return inter / ua if ua > 0 else 0.0
+
+
+def _quality(box, score):
+    """Best-shot score: confident AND large — a big, sure box makes the best re-ID crop."""
+    return float(score) * ((box[2] - box[0]) * (box[3] - box[1])) ** 0.5
+
+
+class Tracker:
+    """Online single-camera tracker over sampled presence frames. Each frame's YOLOX boxes are associated
+    to open tracks by IoU, so one person's run of sightings becomes one track. A track closes when it gets
+    no obs for TRACK_GAP seconds of PROCESSED footage (clock = segment ts via tick(), not wall time, so an
+    idle sleep never splits a track and a departed person closes on schedule); a long track also emits a
+    chunk every TRACK_MAX seconds so identity latency stays bounded. On emit it calls finalize(obs, s0, s1)
+    — the ONE place HD is decoded + embedded + inserted, on the track's best shot, instead of per frame."""
+
+    def __init__(self, finalize):
+        self.finalize = finalize
+        self.tracks = []
+        self._next = 1
+
+    def update(self, ts, seg_id, boxes):
+        """Associate this frame's boxes (presence px, all at wall-clock ts) to open tracks; greedy by IoU,
+        at most one box per track per frame; unmatched boxes open new tracks."""
+        used = set()
+        for b in boxes:
+            box, score = b["box"], float(b["score"])
+            best, bj = TRACK_IOU, None
+            for ti, tr in enumerate(self.tracks):
+                if ti in used or ts - tr["last_ts"] > TRACK_GAP:
+                    continue
+                v = _iou(box, tr["last_box"])
+                if v >= best:
+                    best, bj = v, ti
+            if bj is None:
+                self.tracks.append({"id": self._next, "last_ts": ts, "last_box": box,
+                                    "s0": ts, "obs": [(ts, seg_id, box, score)]})
+                self._next += 1
+                used.add(len(self.tracks) - 1)
+            else:
+                tr = self.tracks[bj]
+                tr["last_ts"], tr["last_box"] = ts, box
+                tr["obs"].append((ts, seg_id, box, score))
+                used.add(bj)
+
+    def tick(self, now_ts, flush=False):
+        """Advance the clock to now_ts (a processed segment's start). Finalize stale tracks; cap long ones
+        (emit a chunk, keep the track open for continuity). flush=True emits everything (shutdown/backfill end)."""
+        keep = []
+        for tr in self.tracks:
+            if flush or now_ts - tr["last_ts"] > TRACK_GAP:
+                self._emit(tr)
+            elif tr["obs"] and tr["obs"][-1][0] - tr["s0"] >= TRACK_MAX:
+                self._emit(tr)
+                tr["obs"], tr["s0"] = [], tr["last_ts"]    # fresh chunk; track stays open to keep associating
+                keep.append(tr)
+            else:
+                keep.append(tr)
+        self.tracks = keep
+
+    def _emit(self, tr):
+        if tr["obs"]:
+            self.finalize(tr["obs"], tr["obs"][0][0], tr["obs"][-1][0])
+
+
+def make_finalize(nvr, cur, pres_wh_box, stats):
+    """Build the Tracker finalize callback: pick the track's best shot, decode HD once there (SD fallback
+    on a gap), embed, insert one detection spanning [s0, s1], and save its crop. pres_wh_box[0] is the
+    current presence-frame size (constant for SD); stats['n'] counts emitted detections for the batch log."""
+    def finalize(obs, s0, s1):
+        ts, seg_id, box, score = max(obs, key=lambda o: _quality(o[2], o[3]))
+        pres_wh = pres_wh_box[0]
+        rframe, rseg, rboxes = _reid_boxes(nvr, ts, [box], pres_wh) if pres_wh else (None, None, None)
+        if rframe is None:                                # no HD there: re-ID on the SD best shot
+            rframe = _decode_at(nvr, seg_id, ts)
+            if rframe is None:
+                return
+            rseg, rbox = seg_id, box
+        else:
+            rbox = rboxes[0]
+        ev = detect.embed(rframe, [rbox])[0]
+        did = _insert_detection(cur, ts, rseg, rbox, score, ev, s0, s1)
+        _save_crop(rframe, rbox, did)
+        stats["n"] += 1
+    return finalize
 
 
 def _cluster(cur):
@@ -221,10 +352,16 @@ def run():
         print(f"motion gate ON (min_px={GATE_MIN_PX}, k={GATE_K}): YOLOX runs only on foreground frames", flush=True)
     if REID_STREAM:
         print(f"presence on '{STREAM}', re-ID crops from '{REID_STREAM}' (HD decoded only on a hit)", flush=True)
+    if TRACK:
+        print(f"track mode ON: IoU>={TRACK_IOU}, close after {TRACK_GAP}s idle, chunk cap {TRACK_MAX}s "
+              f"(one HD re-ID per track)", flush=True)
     while True:                                           # reconnect loop: a DB error drops to here
         orc = None
         try:
             orc = adb.connect(); cur = orc.cursor()
+            # per-connection so a reconnect restarts cleanly (in-flight tracks are dropped, re-acquired live)
+            stats = {"n": 0}; pres_wh_box = [None]
+            tracker = Tracker(make_finalize(nvr, cur, pres_wh_box, stats)) if TRACK else None
             newest = nvr.execute("SELECT max(id) FROM segments WHERE stream = ?", (STREAM,)).fetchone()[0] or 0
             last = get_state(cur, "last_seg_id", newest)  # first run: start at the live edge
             print(f"detect poller: starting at seg {last} (newest {newest}), stride {STRIDE}", flush=True)
@@ -232,10 +369,18 @@ def run():
                 ids = _due(nvr, last)
                 if not ids:
                     time.sleep(IDLE); continue
-                n = 0
+                stats["n"] = 0
                 for sid in ids:
                     try:
-                        n += process_segment(nvr, cur, sid, gate)
+                        if tracker is not None:
+                            start, pres_wh, frames = _presence(nvr, sid, gate)
+                            if start is not None:
+                                pres_wh_box[0] = pres_wh
+                                for ts, frame, boxes in frames:
+                                    tracker.update(ts, sid, boxes)
+                                tracker.tick(start)        # advance clock; close/cap tracks, emitting detections
+                        else:
+                            stats["n"] += process_segment(nvr, cur, sid, gate)
                     except oracledb.DatabaseError:
                         raise                              # connection trouble -> reconnect, keep `last`
                     except Exception as e:
@@ -244,8 +389,8 @@ def run():
                 set_state(cur, "last_seg_id", last); orc.commit()  # inserts+cursor advance commit together
                 if gate is not None:
                     gate.save()                            # persist the background model for restart recovery
-                if n:
-                    print(f"  up to seg {last}: {n} person-detection(s) stored", flush=True)
+                if stats["n"]:
+                    print(f"  up to seg {last}: {stats['n']} person-detection(s) stored", flush=True)
                     try:
                         g = _cluster(cur); orc.commit()
                         print(f"    grouped unknowns into {g} cluster(s)", flush=True)
@@ -271,18 +416,31 @@ def backfill(a, b):
         "SELECT id FROM segments WHERE id BETWEEN ? AND ? AND stream = ? ORDER BY id",
         (a, b, STREAM)).fetchall() if r[0] % STRIDE == 0]
     print(f"backfill {len(ids)} segments ({a}..{b}, stride {STRIDE})"
+          + (", track mode" if TRACK else "")
           + (f", motion gate min_px={GATE_MIN_PX}" if gate is not None else ""), flush=True)
-    total = 0; t0 = time.time()
+    stats = {"n": 0}; pres_wh_box = [None]
+    tracker = Tracker(make_finalize(nvr, cur, pres_wh_box, stats)) if TRACK else None
+    t0 = time.time()
     for i, sid in enumerate(ids):
         try:
-            total += process_segment(nvr, cur, sid, gate)
+            if tracker is not None:
+                start, pres_wh, frames = _presence(nvr, sid, gate)
+                if start is not None:
+                    pres_wh_box[0] = pres_wh
+                    for ts, frame, boxes in frames:
+                        tracker.update(ts, sid, boxes)
+                    tracker.tick(start)
+            else:
+                stats["n"] += process_segment(nvr, cur, sid, gate)
         except Exception as e:
             print(f"  seg {sid} error: {e}", flush=True)
         if i % 10 == 9:
-            orc.commit(); print(f"  {i+1}/{len(ids)} done, {total} detections, "
+            orc.commit(); print(f"  {i+1}/{len(ids)} done, {stats['n']} detections, "
                                 f"{(time.time()-t0)/(i+1):.1f}s/seg", flush=True)
+    if tracker is not None:
+        tracker.tick(0, flush=True)                       # emit any still-open tracks at the end of the range
     orc.commit()
-    print(f"backfill done: {total} detections from {len(ids)} frames in {time.time()-t0:.0f}s", flush=True)
+    print(f"backfill done: {stats['n']} detections from {len(ids)} segments in {time.time()-t0:.0f}s", flush=True)
 
 
 def backfill_crops():
