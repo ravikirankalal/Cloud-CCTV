@@ -92,6 +92,7 @@ header h1{font-family:"Bricolage Grotesque",serif;font-size:20px;font-weight:700
 /* controls */
 .controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:16px 0}
 .cluster{display:inline-flex;align-items:center;gap:8px}
+.icon.det{color:var(--det)}                 /* tie the detection-jump buttons to the "Person seen" marks */
 .controls .spacer{flex:1 1 8px}
 .icon{width:44px;padding:0;font-size:17px}
 .golive{background:var(--live);border-color:transparent;color:#fff;font-weight:700;letter-spacing:.2px;
@@ -178,6 +179,10 @@ dialog .close button{width:100%}
       <button id="back10" aria-label="Back 10 seconds">−10s</button>
       <button class="icon" id="playBtn" aria-label="Play or pause">⏸</button>
       <button id="fwd10" aria-label="Forward 10 seconds">+10s</button>
+    </div>
+    <div class="cluster" role="group" aria-label="Jump between detections">
+      <button class="icon det" id="prevDet" aria-label="Previous detection" title="Previous detection"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="12.5 7 8 12 12.5 17"/><circle cx="17" cy="10.2" r="2.1"/><path d="M14.2 16.6a2.9 2.9 0 0 1 5.6 0"/></svg></button>
+      <button class="icon det" id="nextDet" aria-label="Next detection" title="Next detection"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="11.5 7 16 12 11.5 17"/><circle cx="7" cy="10.2" r="2.1"/><path d="M4.2 16.6a2.9 2.9 0 0 1 5.6 0"/></svg></button>
     </div>
     <span class="seg" id="speeds" role="group" aria-label="Playback speed"><button data-s="1" class="on">1×</button><button data-s="2">2×</button><button data-s="4">4×</button><button data-s="8">8×</button></span>
     <button class="icon" id="soundBtn" aria-label="Sound on or off">🔇</button>
@@ -631,6 +636,21 @@ video.addEventListener('play', ui); video.addEventListener('pause', ui);
 video.addEventListener('play', soundSync); video.addEventListener('pause', soundSync);
 $('back10').onclick = () => st.wall && seekWall(st.wall - 10);
 $('fwd10').onclick = () => st.wall && seekWall(st.wall + 10);
+
+// jump to the nearest person-detection before/after the playhead (within the day on screen).
+// st.dets is [[ts_start, ts_end], ...] sorted by ts_start; we seek to the start of the detection.
+let detFlashT = null;
+function detFlash(msg) { message(msg); clearTimeout(detFlashT); detFlashT = setTimeout(() => message(''), 1300); }
+function gotoDet(dir) {
+  const dets = st.dets || [], cur = st.wall || now(), EPS = 1.2;
+  let target = null;
+  if (dir > 0) { for (const d of dets) if (d[0] > cur + EPS) { target = d[0]; break; } }
+  else { for (let i = dets.length - 1; i >= 0; i--) if (dets[i][0] < cur - EPS) { target = dets[i][0]; break; } }
+  if (target == null) return detFlash(dets.length ? (dir > 0 ? 'No later detection this day' : 'No earlier detection this day') : 'No detections this day');
+  st.center = target; playAt(target);
+}
+$('prevDet').onclick = () => gotoDet(-1);
+$('nextDet').onclick = () => gotoDet(1);
 $('speeds').onclick = e => { const s = +e.target.dataset.s; if (!s) return; st.speed = s; video.playbackRate = s; ui(); };
 $('zooms').onclick = e => {
   const z = +e.target.dataset.z; if (!z) return; st.zoom = z; st.center = st.wall || now();
