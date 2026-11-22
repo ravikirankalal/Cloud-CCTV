@@ -12,10 +12,11 @@ Environment=NVR_DET_CONF=0.25
 # Sampling budget on this 2-core / 952 MB box. History:
 #   STRIDE=1/FRAMES=2 (2 frames/segment, ~0.2 fps, 4x) overloaded it with NO swap: the mid-segment
 #   decode competes with the recorder's ffmpeg and the box thrashed (loadavg ~25, API hung).
-# Since 2026-11-21 the box has a 2 GB swapfile, so we take the gentle 2x step the old comment flagged:
-#   STRIDE=1/FRAMES=1 = 1 frame every segment, ~0.1 fps (one frame ~10s), double the ~0.05 fps of STRIDE=2.
-# decode_frames() stays in detect.py (dormant at FRAMES=1). Watch loadavg after any further bump.
-Environment=DET_STRIDE=1
+#   STRIDE=1/FRAMES=1 (the "gentle 2x" step after the 2026-11-21 swapfile) was tried and backed out:
+#   when the camera uplink later collapsed, recording needed all the headroom, so detection yields it.
+# STRIDE=2 = ~1 frame every 2 segments (~0.05 fps) leaves the recorder's ffmpeg uncontended. This is
+# the sustained setting; revisit a bump only once the uplink is healthy. decode_frames() dormant at FRAMES=1.
+Environment=DET_STRIDE=2
 ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_service.py run
 Restart=always
 RestartSec=10
