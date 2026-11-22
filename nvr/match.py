@@ -115,16 +115,18 @@ def tag_cluster(cur, detection_id, name):
     embedding sits past the re-ID threshold from the tapped crop would be stripped back to unknown,
     leaving the tag on only one. confirmed=1 makes the group label stick and seeds future re-ID.
 
-    But claim only UNCONFIRMED members (plus any already this identity) — never crops the user confirmed
-    as a DIFFERENT person. A crop removed from another group (unassign) keeps its old cluster_id until
-    re-clustered, and without this guard re-tagging it would drag its old cluster-mates along."""
+    Claim every UNKNOWN member of the group (identity_id IS NULL, confirmed or not) plus unconfirmed and
+    already-this-identity ones — but never a crop the user confirmed to a DIFFERENT KNOWN person. Unknown
+    members can be confirmed=1 (an unassign asserts "unknown, don't auto-assign"); re-clustering can still
+    group them here, and a group tag is the user asserting the WHOLE group is this person, so they count."""
     ident = get_or_create_identity(cur, name)
     cur.execute("SELECT cluster_id FROM detections WHERE id = :1", [detection_id])
     row = cur.fetchone()
     cid = row[0] if row else None
     if cid is not None:
         cur.execute("""UPDATE detections SET identity_id = :ident, confirmed = 1
-                       WHERE cluster_id = :cid AND (confirmed = 0 OR identity_id = :ident)""",
+                       WHERE cluster_id = :cid
+                         AND (identity_id IS NULL OR confirmed = 0 OR identity_id = :ident)""",
                     {"ident": ident, "cid": cid})
     cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [ident, detection_id])
     cur.execute("INSERT INTO labels (detection_id, identity_id, action) VALUES (:1, :2, 'name')",
@@ -196,10 +198,11 @@ def dismiss_cluster(cur, detection_id):
     r = cur.fetchone()
     cid = r[0] if r else None
     if cid is not None:
-        # Claim only unconfirmed members (plus any already hidden) — don't hide a crop the user confirmed
+        # Claim every unknown member (identity NULL, confirmed or not) + already-hidden — but don't hide a crop the user confirmed
         # as a real known person that happens to share this cluster_id.
         cur.execute("""UPDATE detections SET identity_id = :hid, confirmed = 1
-                       WHERE cluster_id = :cid AND (confirmed = 0 OR identity_id = :hid)""",
+                       WHERE cluster_id = :cid
+                         AND (identity_id IS NULL OR confirmed = 0 OR identity_id = :hid)""",
                     {"hid": hid, "cid": cid})
     cur.execute("UPDATE detections SET identity_id = :1, confirmed = 1 WHERE id = :2", [hid, detection_id])
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'dismiss')", [detection_id])

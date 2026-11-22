@@ -482,7 +482,7 @@ async function openDetail(o){
       const play = b.querySelector('.play');
       if(play) play.addEventListener('click', e => {         // jump to the recorded footage; don't toggle remove
         e.stopPropagation();
-        window.open('/?t=' + play.dataset.t, '_blank', 'noopener');
+        location.href = '/?t=' + play.dataset.t;              // same tab: the live page deep-links /?t=<epoch>
       });
       b.addEventListener('click', () => {
         const id = parseInt(b.dataset.id);
