@@ -152,8 +152,9 @@ def unassign(cur, detection_id):
     be dismissed or tagged correctly.
 
     Also DETACH it into its own cluster (cluster_id = id): it no longer shares the old group's cluster_id,
-    so re-tagging this one crop to another person can't drag its former cluster-mates with it. The next
-    _cluster() pass re-groups it among the unknowns by embedding."""
+    so re-tagging this one crop to another person can't drag its former cluster-mates with it. Because it is
+    confirmed=1, _cluster() PINS it (skips it) on every later pass, so the detachment sticks instead of being
+    re-merged by embedding — the removal is remembered."""
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'remove')", [detection_id])
     cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 1, cluster_id = id WHERE id = :1",
                 [detection_id])
