@@ -20,7 +20,9 @@ STREAM = os.environ.get("NVR_STREAM", "cam1")            # presence source: samp
 REID_STREAM = os.environ.get("DET_REID_STREAM", "")      # re-ID source: "" = same frame; "cam1" = decode HD only
                                                          # for the OSNet crop when SD presence finds a person
 STRIDE = int(os.environ.get("DET_STRIDE", "2"))          # sample every Nth segment
-FRAMES = int(os.environ.get("DET_FRAMES", "1"))          # frames sampled per segment (evenly spaced)
+FRAMES = int(os.environ.get("DET_FRAMES", "1"))          # frames/segment at the LIVE edge (evenly spaced)
+FRAMES_BACKFILL = int(os.environ.get("DET_FRAMES_BACKFILL", "1"))  # coarser rate while catching up on old footage
+BACKFILL_AGE = float(os.environ.get("DET_BACKFILL_AGE", "120"))    # a segment older than this (s) is backfill, not live
 BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop before committing/sleeping
 IDLE = int(os.environ.get("DET_IDLE", "15"))             # sleep seconds when caught up
 RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnecting to Oracle after a DB error
@@ -127,20 +129,24 @@ def _presence(nvr, seg_id, gate=None):
     still sees every frame so its background model stays current. seg_start is returned even with no
     boxes, so a caller's tracker can advance its clock over empty footage.
 
-    With DET_FRAMES>1 we sample that many frames evenly across the segment (single ffmpeg pass; see
-    detect.decode_frames). Each frame's ts is its own wall-clock time (start + i*dur/FRAMES)."""
+    Sample rate adapts to how fresh the footage is: a LIVE segment (recorded within BACKFILL_AGE seconds)
+    gets DET_FRAMES frames for fine temporal resolution; an OLD segment (we're catching up on a backlog)
+    gets the coarser DET_FRAMES_BACKFILL so the poller drains fast and returns to live. With n>1 we sample
+    that many frames evenly across the segment (single ffmpeg pass; see detect.decode_frames). Each frame's
+    ts is its own wall-clock time (start + i*dur/n)."""
     row = nvr.execute("SELECT start, path, init, dur FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
         return None, None, []
     start, path, init, dur = row
+    n = FRAMES if (time.time() - float(start)) <= BACKFILL_AGE else FRAMES_BACKFILL
     init_abs = os.path.join(DATA, init)
-    frames = detect.decode_frames(init_abs, os.path.join(DATA, path), FRAMES, dur)
+    frames = detect.decode_frames(init_abs, os.path.join(DATA, path), n, dur)
     pres_wh = detect._frame_dims(init_abs)
     out = []
     for i, frame in enumerate(frames):
         if gate is not None and not gate.check(frame)[0]:
             continue                                      # empty scene: don't pay for YOLOX
-        ts = float(start) + (i * float(dur) / FRAMES if dur and FRAMES > 1 else 0.0)
+        ts = float(start) + (i * float(dur) / n if dur and n > 1 else 0.0)
         boxes = detect.detect_in(frame)                   # YOLOX presence (on the SD frame when so configured)
         if boxes:
             out.append((ts, frame, boxes))

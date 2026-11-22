@@ -25,6 +25,11 @@ Environment=DET_STRIDE=1
 Environment=DET_TRACK=1
 Environment=DET_IDLE=5
 Environment=DET_TRACK_GAP=12
+# Sample rate: fine at the live edge, coarse while catching up (a segment older than DET_BACKFILL_AGE s
+# is backfill). Keeps live presence resolution high without slowing down backlog recovery.
+Environment=DET_FRAMES=3
+Environment=DET_FRAMES_BACKFILL=1
+Environment=DET_BACKFILL_AGE=120
 ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_service.py run
 Restart=always
 RestartSec=10
