@@ -290,9 +290,13 @@ function makeTS() {  // an MPEG-TS writer; TS (below) is the live recording's, a
   };
   const section = bytes => { const b = Buffer.from(bytes), c = Buffer.alloc(4); c.writeUInt32BE(crc32(b)); return Buffer.concat([Buffer.from([0]), b, c]); };
   const PAT = section([0x00, 0xb0, 13, 0x00, 0x01, 0xc1, 0x00, 0x00, 0x00, 0x01, 0xe0 | PMT_PID >> 8, PMT_PID & 0xff]);
-  const PMT = section([0x02, 0xb0, 23, 0x00, 0x01, 0xc1, 0x00, 0x00, 0xe0 | VPID >> 8, VPID & 0xff, 0xf0, 0x00,
-    0x24, 0xe0 | VPID >> 8, VPID & 0xff, 0xf0, 0x00,     // H.265
+  // video stream_type: 0x24 = H.265/HEVC (the HD main stream + SD-card replay), 0x1b = H.264/AVC (the
+  // SD sub-stream, streamid 0). The cloud reports the codec on the first frame (data.enc); setCodec()
+  // rebuilds the PMT before it is first emitted (on that first key frame), so ffmpeg sees the right codec.
+  const buildPMT = vtype => section([0x02, 0xb0, 23, 0x00, 0x01, 0xc1, 0x00, 0x00, 0xe0 | VPID >> 8, VPID & 0xff, 0xf0, 0x00,
+    vtype, 0xe0 | VPID >> 8, VPID & 0xff, 0xf0, 0x00,
     0x0f, 0xe0 | APID >> 8, APID & 0xff, 0xf0, 0x00]);   // AAC (ADTS)
+  let PMT = buildPMT(0x24);
   // 33-bit 90 kHz time in the PES / PCR layouts (no 32-bit bit operations on it)
   const pts5 = t => { const hi = Math.floor(t / 2 ** 30) % 8, mid = Math.floor(t / 2 ** 15) % 2 ** 15, lo = t % 2 ** 15;
     return [0x21 | hi << 1, mid >> 7, (mid & 0x7f) << 1 | 1, lo >> 7, (lo & 0x7f) << 1 | 1]; };
@@ -344,6 +348,7 @@ function makeTS() {  // an MPEG-TS writer; TS (below) is the live recording's, a
       return Buffer.concat(isKey ? [...packets(0, PAT), ...packets(PMT_PID, PMT), ...pkts] : pkts);
     },
     now: () => t0 == null ? null : Math.round((Date.now() - t0) * 90) + 90000,
+    setCodec(enc) { PMT = buildPMT(enc && enc.startsWith("H264") ? 0x1b : 0x24); },
     audio(d, t) {
       const len = 3 + 5 + d.length;
       const pes = Buffer.concat([Buffer.from([0, 0, 1, 0xc0, len >> 8, len & 0xff, 0x80, 0x80, 5, ...pts5(t)]), d]);
@@ -366,6 +371,7 @@ self.postMessage = ({ message, data }) => {
     if (!started) {
       if (data.frametype !== 1) return;                              // start on a key frame
       started = true;
+      TS.setCodec(data.enc);   // tag the PMT for the actual codec (H.264 sub-stream vs H.265 main)
       log(`camera_stream: ${data.enc} ${data.width}x${data.height} @${data.fps}fps`);
       if (LIVE) { liveStart(); audioStart(); }
     }

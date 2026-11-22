@@ -1,0 +1,27 @@
+[Unit]
+# Records the camera's SD sub-stream (streamid 0: H.264 800x448 ~250 kbit/s) as a parallel set of
+# indexed HLS segments under stream "cam1-sd". Two jobs in one: a low-res fallback that keeps
+# recording when the HD uplink can't sustain, and the cheap presence source for detection (YOLOX on
+# the small frame; HD is decoded only for the re-ID crop). Reuses recorder.py; the HD recorder
+# (nvr-recorder) owns disk retention and the live relay, so this instance sets neither.
+Description=NVR: record the SD sub-stream (H.264 800x448) — fallback + detection source (recorder.py)
+After=network-online.target nvr-recorder.service
+Wants=network-online.target
+
+[Service]
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nvr
+Environment=NVR_DATA=/home/ubuntu/nvr-data
+Environment=HD_STREAM_ID=0
+Environment=REC_VTAG=avc1
+Environment=REC_RETENTION=0
+# stagger the cold connect so the HD session claims the camera first (avoids a double-connect race)
+ExecStartPre=/bin/sleep 10
+ExecStart=/usr/bin/python3 /home/ubuntu/nvr/recorder.py /home/ubuntu/nvr/state/hd-device.json cam1-sd
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

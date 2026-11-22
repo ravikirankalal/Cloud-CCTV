@@ -41,6 +41,8 @@ STREAM_ID = os.environ.get("HD_STREAM_ID", "2")
 MIN_FREE_GB = float(os.environ.get("MIN_FREE_GB", "25"))
 SOURCE = os.environ.get("HD_SOURCE", os.path.join(HERE, "camera_stream.js"))
 LIVE_SOCK = os.environ.get("HD_LIVE_SOCK", "")  # empty: no live relay
+VTAG = os.environ.get("REC_VTAG", "hvc1")       # fMP4 video tag: hvc1 (H.265 HD) or avc1 (H.264 SD sub-stream)
+RETENTION = os.environ.get("REC_RETENTION", "1") != "0"  # one owner prunes the shared disk; others set 0
 BACKOFF = [5, 15, 30, 60]  # seconds between reconnect attempts after repeated quick failures; we
                            # reconnect when the stream actually drops, never on purpose
 REFUSAL_WAIT = 55          # the cloud refuses new connects for ~50 s after a drop (source exits 2);
@@ -297,7 +299,7 @@ def run_once(device, stream):
     rec = subprocess.Popen(
         ["ffmpeg", "-nostdin", "-v", "error",
          "-f", "mpegts", "-i", "-",
-         "-map", "0:v", "-map", "0:a?", "-c", "copy", "-tag:v", "hvc1", "-bsf:a", "aac_adtstoasc",
+         "-map", "0:v", "-map", "0:a?", "-c", "copy", "-tag:v", VTAG, "-bsf:a", "aac_adtstoasc",
          "-f", "hls", "-hls_time", "2", "-hls_list_size", "30",
          "-hls_segment_type", "fmp4", "-hls_fmp4_init_filename", f"init/init-{run}.mp4",
          "-hls_flags", "program_date_time+independent_segments+temp_file",
@@ -333,7 +335,8 @@ def main():
     os.makedirs(DATA, exist_ok=True)
     db().close()
     stop_evt = threading.Event()
-    threading.Thread(target=retention, args=(stop_evt,), daemon=True).start()
+    if RETENTION:  # the SD recorder shares the disk+DB with the HD one; only one instance prunes
+        threading.Thread(target=retention, args=(stop_evt,), daemon=True).start()
     fails = 0
     while not stopping:
         lasted, refused = run_once(device, stream)
