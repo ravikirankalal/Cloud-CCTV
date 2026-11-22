@@ -212,7 +212,7 @@ def test_finalize_row():
     ds.match_known = lambda c, e: None
     try:
         pres_wh_box = [(800, 448)]; stats = {"n": 0}
-        finalize = ds.make_finalize(nvr, cur, pres_wh_box, stats)
+        finalize = ds.make_finalize([nvr], cur, pres_wh_box, stats)
         # best shot is the big box at ts=1002 (quality beats the others); span is [1000, 1007]
         obs = [(1000.0, 5, [0, 0, 10, 10], 0.95),
                (1002.0, 6, [0, 0, 100, 200], 0.80),    # best (big)
@@ -244,7 +244,7 @@ def test_finalize_sd_fallback():
     saved_match = ds.match_known
     ds.match_known = lambda c, e: None
     try:
-        finalize = ds.make_finalize(nvr, cur, [(800, 448)], {"n": 0})
+        finalize = ds.make_finalize([nvr], cur, [(800, 448)], {"n": 0})
         finalize([(2001.0, 7, [0, 0, 50, 100], 0.9)], 2001.0, 2001.0)
         check("sd-fallback: one row inserted", len(cur.inserts) == 1, len(cur.inserts))
         p = cur.inserts[0]
