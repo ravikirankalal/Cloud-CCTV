@@ -20,7 +20,11 @@ Environment=NVR_CROPS=/home/ubuntu/nvr-data/crops
 Environment=NVR_BG=/home/ubuntu/nvr-data/detect_bg.npz
 Environment=NVR_DET_CONF=0.25
 Environment=NVR_STREAM=cam1-sd
-Environment=DET_REID_STREAM=cam1
+# Re-ID (crop + embedding) from the SAME SD frame the person was detected on. HD re-ID (cam1) was
+# tried, but cam1 and cam1-sd are independent recorder runs with per-run timebase drift (observed ~4s):
+# decoding HD at the SD detection's ts lands on a frame seconds off, so a moving person's crop+embedding
+# fall on background. Empty = re-ID on the aligned presence frame, which is correct (and skips the HD decode).
+Environment=DET_REID_STREAM=
 Environment=DET_STRIDE=1
 Environment=DET_TRACK=1
 Environment=DET_IDLE=5
