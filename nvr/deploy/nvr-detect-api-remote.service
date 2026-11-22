@@ -1,0 +1,24 @@
+[Unit]
+# detect-api co-located with the detector (micro #2), serving its local crops. Binds 0.0.0.0 so the
+# recording box's nginx can proxy /detapi/ to it over the private subnet (10.0.0.x); access is limited
+# to the subnet by the VCN security list + host firewall, so it is not publicly reachable.
+Description=NVR people / feedback API (remote detector box; reads Oracle + local crops)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/nvr
+Environment=ADB_WALLET=/home/ubuntu/nvr/adb-wallet
+Environment=NVR_CROPS=/home/ubuntu/nvr-data/crops
+Environment=DETAPI_PORT=3401
+Environment=DETAPI_HOST=0.0.0.0
+ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_api.py
+Restart=always
+RestartSec=10
+MemoryHigh=200M
+MemoryMax=260M
+
+[Install]
+WantedBy=multi-user.target

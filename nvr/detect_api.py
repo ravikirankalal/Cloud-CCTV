@@ -33,6 +33,7 @@ import match
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("NVR_DATA", "/home/ubuntu/nvr-data")
 PORT = int(os.environ.get("DETAPI_PORT", "3401"))
+HOST = os.environ.get("DETAPI_HOST", "127.0.0.1")  # 0.0.0.0 when nginx is on another box (remote detector)
 CROP_DIR = os.environ.get("NVR_CROPS") or os.path.join(DATA, "crops")  # static crops from detect_service
                                           # (NVR_CROPS must match the detector's when they share a box)
 UNKNOWN_LIMIT = 120
@@ -363,5 +364,5 @@ class H(BaseHTTPRequestHandler):
 
 
 if __name__ == "__main__":
-    print(f"detect-api on 127.0.0.1:{PORT}", flush=True)
-    ThreadingHTTPServer(("127.0.0.1", PORT), H).serve_forever()
+    print(f"detect-api on {HOST}:{PORT}", flush=True)
+    ThreadingHTTPServer((HOST, PORT), H).serve_forever()
