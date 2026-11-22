@@ -29,7 +29,7 @@
   --amber:#f0a83a; --amber-deep:#c6831f; --amber-ink:#241704; --amber-glow:rgba(240,168,58,.16);
   --rust:#d2705a;                                   /* destructive only */
   /* timeline data legend (reserved for the recorded-coverage bar) */
-  --rec:#5aa0d8; --card:#e0932f; --off:#6b2b30;
+  --rec:#5aa0d8; --card:#e0932f; --off:#6b2b30; --det:#c792ea;
   --live:#ff4155; --ok:#6fcaa0; --warn:#f0a83a;
   --glow:rgba(240,168,58,.22);
   --radius:16px; --radius-sm:11px;
@@ -201,6 +201,7 @@ dialog .close button{width:100%}
       <div class="legend">
         <span><i class="key" style="background:var(--rec)"></i>Recorded</span>
         <span><i class="key" style="background:var(--card)"></i>From SD card</span>
+        <span><i class="key" style="background:var(--det)"></i>Person seen</span>
       </div>
       <span id="store" class="mono"></span>
     </div>
@@ -445,6 +446,13 @@ async function loadSpans() {
   try { const r = await api('coverage', { from: t0, to: t1 }); if (r.ok) { const j = await r.json(); spans = j.spans || []; card = j.card || []; offline = j.offline || []; } } catch {}
   // also what's after this day, so playback can run on
   try { const r = await api('coverage', { from: t1, to: now() + 60 }); if (r.ok) spans = spans.concat((await r.json()).spans || []); } catch {}
+  // detection marks for this day — refetch on a day change, else at most every 15 s (the live span
+  // refresh runs every 5 s; new detections surface within a bin's width anyway)
+  if (st.detDay !== st.day || Date.now() - (st.detAt || 0) > 15000) {
+    st.detDay = st.day; st.detAt = Date.now();
+    try { const r = await fetch('/detapi/times?' + new URLSearchParams({ from: t0, to: t1 }), { cache: 'no-store' });
+          if (r.ok) { const j = await r.json(); st.dets = j.bins || []; st.detW = j.w || 30; } } catch {}
+  }
   if (req !== spanReq) return;                                   // a newer load superseded this one
   st.spans = spans; st.card = card; st.offline = offline;
   draw();
@@ -478,6 +486,21 @@ function draw() {
   // camera-off gaps are left as the empty bar background (no band)
   paint([...(st.spans || []), ...(st.card || [])], '--rec');       // one continuous recorded base: live + card-filled
   paint(st.card, '--card');                                        // highlight, on top, the parts filled from the SD card
+  // detection marks: a thin cap along the top edge of the recorded bar wherever a person was seen.
+  // Each bin is a [start, start+w] span, coalesced to pixel runs so dense sightings read as a solid
+  // band and a lone one still shows as a visible tick.
+  if ((st.dets || []).length) {
+    const dw = st.detW || 30, runs = [];
+    for (const s of st.dets) {
+      const e = s + dw;
+      if (e <= a || s >= b) continue;
+      const x0 = Math.max(0, x(s)), x1 = Math.min(w, x(e));
+      if (runs.length && x0 <= runs[runs.length - 1][1] + 0.6) runs[runs.length - 1][1] = Math.max(runs[runs.length - 1][1], x1);
+      else runs.push([x0, x1]);
+    }
+    g.fillStyle = css.getPropertyValue('--det');
+    for (const [x0, x1] of runs) g.fillRect(x0, 14, Math.max(1.5, x1 - x0), 4);
+  }
   // future: hatched
   const n = now();
   if (n < b) { g.fillStyle = '#0a100e'; g.fillRect(x(n), 14, w - x(n), 24); }
