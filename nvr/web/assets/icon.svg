@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Guttedar Nilaya">
+  <rect width="48" height="48" rx="11" fill="#0c1312"/>
+  <rect x="1.5" y="1.5" width="45" height="45" rx="9.5" fill="none" stroke="#f0a83a" stroke-opacity=".18" stroke-width="1"/>
+  <circle cx="24" cy="24" r="12.4" fill="none" stroke="#f0a83a" stroke-width="3.4"/>
+  <circle cx="24" cy="24" r="4.3" fill="#f0a83a"/>
+</svg>
