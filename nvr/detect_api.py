@@ -156,11 +156,11 @@ def group(rep_id, frm=None, to=None):
         if ranged:
             cur.execute("""SELECT id, ts, score FROM detections
                            WHERE identity_id IS NULL AND NVL(cluster_id, id) = :1 AND ts >= :2 AND ts < :3
-                           ORDER BY score DESC FETCH FIRST 500 ROWS ONLY""", [grp, frm, to])
+                           ORDER BY ts DESC FETCH FIRST 500 ROWS ONLY""", [grp, frm, to])
         else:
             cur.execute("""SELECT id, ts, score FROM detections
                            WHERE identity_id IS NULL AND NVL(cluster_id, id) = :1
-                           ORDER BY score DESC FETCH FIRST 500 ROWS ONLY""", [grp])
+                           ORDER BY ts DESC FETCH FIRST 500 ROWS ONLY""", [grp])
         return grp, cur.fetchall()
     grp, rows = db(q)
     dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
