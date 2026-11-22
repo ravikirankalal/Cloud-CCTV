@@ -26,8 +26,15 @@ IDLE = int(os.environ.get("DET_IDLE", "15"))             # sleep seconds when ca
 RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnecting to Oracle after a DB error
 MATCH_DIST = float(os.environ.get("DET_MATCH", "0.28"))  # cosine distance < this => same known person
 CLUSTER_DIST = float(os.environ.get("DET_CLUSTER", "0.28"))  # cosine distance to group unknowns together
-CROP_DIR = os.path.join(DATA, "crops")                   # one static person-crop jpeg per detection
-BG_PATH = os.path.join(DATA, "detect_bg.npz")            # persisted motion-gate background model
+# CROP_DIR / BG_PATH default under DATA, but are overridable so a remote detector (DATA = a read-only
+# mount of the recorder's segments) can still WRITE its crops + gate model to a local, writable path.
+CROP_DIR = os.environ.get("NVR_CROPS") or os.path.join(DATA, "crops")   # static person-crop jpegs
+BG_PATH = os.environ.get("NVR_BG") or os.path.join(DATA, "detect_bg.npz")  # persisted motion-gate model
+# Segment DB: local nvr.db (WAL, mode=ro) by default. A remote detector points NVR_DB_PATH at a periodic
+# consistent SNAPSHOT (VACUUM INTO, no WAL) shared read-only, and sets NVR_DB_IMMUTABLE=1 so SQLite reads
+# it without locks/-shm (safe over NFS); the snapshot is replaced per poll, so run() reopens it each batch.
+DB_PATH = os.environ.get("NVR_DB_PATH") or os.path.join(DATA, "nvr.db")
+DB_IMMUTABLE = os.environ.get("NVR_DB_IMMUTABLE") == "1"
 GATE_ENABLED = os.environ.get("DET_GATE", "1") != "0"    # skip YOLOX on empty (no-foreground) frames
 GATE_MIN_PX = int(os.environ.get("DET_GATE_MIN_PX", "140"))  # foreground blob px (160-wide grid) to trigger
 GATE_K = float(os.environ.get("DET_GATE_K", "2.5"))      # per-pixel std multiple for the background model
@@ -48,11 +55,14 @@ detect = importlib.util.module_from_spec(_spec); _spec.loader.exec_module(detect
 
 
 def ro_nvr():
-    # mode=ro (NOT immutable): the recorder writes nvr.db in WAL mode, so new segments live in the -wal
-    # file until a checkpoint. immutable=1 reads only the main db file and ignores the WAL, freezing the
-    # poller at the last checkpoint (it never sees live segments). A plain read-only handle reads the WAL
-    # and sees the live edge, and WAL still lets the recorder write concurrently without blocking.
-    return sqlite3.connect(f"file:{os.path.join(DATA, 'nvr.db')}?mode=ro", uri=True)
+    # Local (default): mode=ro, NOT immutable — the recorder writes nvr.db in WAL mode, so new segments
+    # live in -wal until a checkpoint; immutable=1 would ignore the WAL and freeze at the last checkpoint.
+    # A plain read-only handle reads the WAL and sees the live edge, and WAL still lets the recorder write
+    # concurrently without blocking.
+    # Remote (NVR_DB_IMMUTABLE=1): DB_PATH is a static snapshot (no WAL), so immutable=1 reads it with no
+    # locks and no -shm — the only mode that is safe over an NFS mount. run() reopens it each poll batch.
+    q = "immutable=1" if DB_IMMUTABLE else "mode=ro"
+    return sqlite3.connect(f"file:{DB_PATH}?{q}", uri=True)
 
 
 def match_known(cur, emb):
@@ -266,11 +276,13 @@ class Tracker:
             self.finalize(tr["obs"], tr["obs"][0][0], tr["obs"][-1][0])
 
 
-def make_finalize(nvr, cur, pres_wh_box, stats):
+def make_finalize(nvr_h, cur, pres_wh_box, stats):
     """Build the Tracker finalize callback: pick the track's best shot, decode HD once there (SD fallback
-    on a gap), embed, insert one detection spanning [s0, s1], and save its crop. pres_wh_box[0] is the
+    on a gap), embed, insert one detection spanning [s0, s1], and save its crop. nvr_h[0] is the current
+    segment-DB handle (a holder, since remote mode reopens the snapshot each batch); pres_wh_box[0] is the
     current presence-frame size (constant for SD); stats['n'] counts emitted detections for the batch log."""
     def finalize(obs, s0, s1):
+        nvr = nvr_h[0]
         ts, seg_id, box, score = max(obs, key=lambda o: _quality(o[2], o[3]))
         pres_wh = pres_wh_box[0]
         rframe, rseg, rboxes = _reid_boxes(nvr, ts, [box], pres_wh) if pres_wh else (None, None, None)
@@ -346,7 +358,7 @@ def _due(nvr, last):
 
 
 def run():
-    nvr = ro_nvr()
+    nvr_h = [ro_nvr()]                                    # holder: remote mode reopens the snapshot per batch
     gate = MotionGate(BG_PATH, min_px=GATE_MIN_PX, k=GATE_K) if GATE_ENABLED else None
     if gate is not None:
         print(f"motion gate ON (min_px={GATE_MIN_PX}, k={GATE_K}): YOLOX runs only on foreground frames", flush=True)
@@ -355,17 +367,24 @@ def run():
     if TRACK:
         print(f"track mode ON: IoU>={TRACK_IOU}, close after {TRACK_GAP}s idle, chunk cap {TRACK_MAX}s "
               f"(one HD re-ID per track)", flush=True)
+    if DB_IMMUTABLE:
+        print(f"remote mode: segments from snapshot '{DB_PATH}' (reopened each batch)", flush=True)
     while True:                                           # reconnect loop: a DB error drops to here
         orc = None
         try:
             orc = adb.connect(); cur = orc.cursor()
             # per-connection so a reconnect restarts cleanly (in-flight tracks are dropped, re-acquired live)
             stats = {"n": 0}; pres_wh_box = [None]
-            tracker = Tracker(make_finalize(nvr, cur, pres_wh_box, stats)) if TRACK else None
-            newest = nvr.execute("SELECT max(id) FROM segments WHERE stream = ?", (STREAM,)).fetchone()[0] or 0
+            tracker = Tracker(make_finalize(nvr_h, cur, pres_wh_box, stats)) if TRACK else None
+            newest = nvr_h[0].execute("SELECT max(id) FROM segments WHERE stream = ?", (STREAM,)).fetchone()[0] or 0
             last = get_state(cur, "last_seg_id", newest)  # first run: start at the live edge
             print(f"detect poller: starting at seg {last} (newest {newest}), stride {STRIDE}", flush=True)
             while True:
+                if DB_IMMUTABLE:                          # pick up the newest snapshot (the file was replaced)
+                    try: nvr_h[0].close()
+                    except Exception: pass
+                    nvr_h[0] = ro_nvr()
+                nvr = nvr_h[0]
                 ids = _due(nvr, last)
                 if not ids:
                     time.sleep(IDLE); continue
@@ -419,7 +438,7 @@ def backfill(a, b):
           + (", track mode" if TRACK else "")
           + (f", motion gate min_px={GATE_MIN_PX}" if gate is not None else ""), flush=True)
     stats = {"n": 0}; pres_wh_box = [None]
-    tracker = Tracker(make_finalize(nvr, cur, pres_wh_box, stats)) if TRACK else None
+    tracker = Tracker(make_finalize([nvr], cur, pres_wh_box, stats)) if TRACK else None
     t0 = time.time()
     for i, sid in enumerate(ids):
         try:

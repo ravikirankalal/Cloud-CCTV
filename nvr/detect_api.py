@@ -33,7 +33,8 @@ import match
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("NVR_DATA", "/home/ubuntu/nvr-data")
 PORT = int(os.environ.get("DETAPI_PORT", "3401"))
-CROP_DIR = os.path.join(DATA, "crops")    # static crops written by the detector (detect_service)
+CROP_DIR = os.environ.get("NVR_CROPS") or os.path.join(DATA, "crops")  # static crops from detect_service
+                                          # (NVR_CROPS must match the detector's when they share a box)
 UNKNOWN_LIMIT = 120
 
 os.makedirs(CROP_DIR, exist_ok=True)
