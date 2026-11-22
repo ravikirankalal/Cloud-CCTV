@@ -16,7 +16,9 @@ import oracledb
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DATA = os.environ.get("NVR_DATA", "/home/ubuntu/nvr-data")
-STREAM = os.environ.get("NVR_STREAM", "cam1")
+STREAM = os.environ.get("NVR_STREAM", "cam1")            # presence source: sampled for YOLOX (cheap SD when set)
+REID_STREAM = os.environ.get("DET_REID_STREAM", "")      # re-ID source: "" = same frame; "cam1" = decode HD only
+                                                         # for the OSNet crop when SD presence finds a person
 STRIDE = int(os.environ.get("DET_STRIDE", "2"))          # sample every Nth segment
 FRAMES = int(os.environ.get("DET_FRAMES", "1"))          # frames sampled per segment (evenly spaced)
 BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop before committing/sleeping
@@ -80,37 +82,77 @@ def _save_crop(frame, box, det_id):
         print(f"  crop {det_id} failed: {e}", flush=True)
 
 
-def process_segment(nvr, cur, seg_id, gate=None):
-    """Detect+embed one segment's frame and insert its people, saving each one's crop jpeg while the
-    frame is in hand. Returns the number of people stored. DB errors propagate (to trigger a
-    reconnect); decode errors are the caller's to swallow.
+def _scale_box(box, src_wh, dst_wh):
+    """Map a box from presence-frame px to re-ID-frame px. The sub-stream is the SAME field of view at a
+    lower resolution, so an independent x/y scale is exact (bar the tiny aspect rounding of 800x448)."""
+    (sw, sh), (dw, dh) = src_wh, dst_wh
+    fx, fy = dw / sw, dh / sh
+    return [box[0] * fx, box[1] * fy, box[2] * fx, box[3] * fy]
 
-    The optional `gate` is a MotionGate: it is fed EVERY decoded frame in order (to keep its background
-    model current) and, on a frame with no foreground blob, we skip the ~0.9 s YOLOX+re-ID pass entirely.
-    Decode is codec-bound and happens either way; the gate's saving is the skipped YOLOX on empty frames.
+
+def _reid_frame(nvr, ts):
+    """The re-ID (HD) segment covering wall-clock `ts` and its decoded frame, or (None, None) when the
+    re-ID stream has a gap there — the caller then re-IDs on the presence frame itself (the fallback case
+    the SD recording exists for). Single-GOP segments, so the decode seeks to ts within the segment."""
+    row = nvr.execute("SELECT id, start, dur, path, init FROM segments WHERE stream = ? AND start <= ? "
+                      "ORDER BY start DESC LIMIT 1", (REID_STREAM, ts)).fetchone()
+    if not row:
+        return None, None
+    sid, start, dur, path, init = row
+    if dur and ts > float(start) + float(dur):
+        return None, None                                 # ts lands in a re-ID-stream gap
+    frame = detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path), max(0.0, ts - float(start)))
+    return int(sid), frame
+
+
+def process_segment(nvr, cur, seg_id, gate=None):
+    """Detect people in one presence segment's frame(s) and insert them, saving each one's crop while the
+    frame is in hand. Returns the number of people stored. DB errors propagate (to trigger a reconnect);
+    decode errors are the caller's to swallow.
+
+    PRESENCE vs RE-ID (DET_REID_STREAM): YOLOX presence runs on the sampled frame of this (presence)
+    segment — cheap when that is the low-res SD sub-stream. When DET_REID_STREAM is set, the OSNet re-ID
+    embedding + crop come from the full-res HD frame at the same wall-clock ts (box scaled SD->HD), and the
+    detection is stored against the HD seg_id so it still navigates to the HD footage. If HD has no frame
+    there (a gap), we re-ID on the presence frame and store its seg_id, so an SD-only sighting is still
+    kept. With DET_REID_STREAM empty the presence frame is also the re-ID frame (the original HD-only path).
+
+    The optional `gate` is a MotionGate: it is fed EVERY presence frame in order (to keep its background
+    model current) and, on a frame with no foreground blob, we skip the YOLOX + re-ID pass entirely.
 
     With DET_FRAMES>1 we sample that many frames evenly across the segment (single ffmpeg pass; see
-    detect.decode_frames). Each detection's ts is the frame's own wall-clock time (start + i·dur/FRAMES),
-    so a sighting still navigates to the exact moment in the recording."""
+    detect.decode_frames). Each detection's ts is the frame's own wall-clock time (start + i·dur/FRAMES)."""
     row = nvr.execute("SELECT start, path, init, dur FROM segments WHERE id = ?", (seg_id,)).fetchone()
     if not row:
         return 0
     start, path, init, dur = row
-    frames = detect.decode_frames(os.path.join(DATA, init), os.path.join(DATA, path), FRAMES, dur)
+    init_abs = os.path.join(DATA, init)
+    frames = detect.decode_frames(init_abs, os.path.join(DATA, path), FRAMES, dur)
+    pres_wh = detect._frame_dims(init_abs) if REID_STREAM else None   # presence-frame size, for SD->HD scaling
     stored = 0
     for i, frame in enumerate(frames):
         if gate is not None and not gate.check(frame)[0]:
             continue                                      # empty scene: don't pay for YOLOX
         ts = float(start) + (i * float(dur) / FRAMES if dur and FRAMES > 1 else 0.0)
-        for d in detect.detect_embed(frame):
-            emb = array.array("f", d["embedding"])
+        boxes = detect.detect_in(frame)                   # YOLOX presence (on the SD frame when so configured)
+        if not boxes:
+            continue
+        rframe, rseg = frame, seg_id                      # re-ID frame/seg: the presence frame by default
+        rboxes = [b["box"] for b in boxes]
+        if REID_STREAM:
+            hd_seg, hd_frame = _reid_frame(nvr, ts)
+            if hd_frame is not None:                       # re-ID + crop from HD; else fall back to SD above
+                rframe, rseg = hd_frame, hd_seg
+                rboxes = [_scale_box(b["box"], pres_wh, (hd_frame.shape[1], hd_frame.shape[0])) for b in boxes]
+        for b, hbox, ev in zip(boxes, rboxes, detect.embed(rframe, rboxes)):
+            emb = array.array("f", [float(x) for x in ev])
             ident = match_known(cur, emb)
             idv = cur.var(oracledb.NUMBER)
             cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id)
                            VALUES (:1, :2, :3, :4, :5, :6) RETURNING id INTO :7""",
-                        (ts, seg_id, ",".join(str(int(v)) for v in d["box"]),
-                         float(d["score"]), emb, ident, idv))
-            _save_crop(frame, d["box"], int(idv.getvalue()[0]))
+                        (ts, rseg, ",".join(str(int(v)) for v in hbox),
+                         float(b["score"]), emb, ident, idv))
+            _save_crop(rframe, hbox, int(idv.getvalue()[0]))
             stored += 1
     return stored
 
@@ -177,6 +219,8 @@ def run():
     gate = MotionGate(BG_PATH, min_px=GATE_MIN_PX, k=GATE_K) if GATE_ENABLED else None
     if gate is not None:
         print(f"motion gate ON (min_px={GATE_MIN_PX}, k={GATE_K}): YOLOX runs only on foreground frames", flush=True)
+    if REID_STREAM:
+        print(f"presence on '{STREAM}', re-ID crops from '{REID_STREAM}' (HD decoded only on a hit)", flush=True)
     while True:                                           # reconnect loop: a DB error drops to here
         orc = None
         try:
