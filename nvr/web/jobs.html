@@ -138,6 +138,8 @@ function dur(s){
   return `${m}m`;
 }
 const OPEN = new Set();                 // units whose full logs are expanded
+const BOX_OF = {};                      // unit -> which box's log endpoint serves it (1 = recorder, 2 = detect)
+const LOG_EP = {1: '/api/jobs/logs', 2: '/detapi/jobs/logs'};
 let TIMER = null;
 
 // ---- machine cards (both VMs): load / memory / disk / uptime, plus detector lag on the detect box ----
@@ -169,8 +171,7 @@ function vmCard(title, sub, d){
     `<span class="vmsub">${sub}</span><span class="vmdot ${tone}"></span></div>${rows}${lag}</div>`;
 }
 
-async function loadVMs(){
-  const [rec, det] = await Promise.all([getSoft('/api/host'), getSoft('/detapi/stats')]);
+function renderVMs(rec, det){
   if (!rec && !det){ $('vms').hidden = true; return; }
   $('vms').hidden = false;
   $('vms').innerHTML = vmCard('Recorder', 'recorder + site', rec)
@@ -207,13 +208,15 @@ function render(d){
     : `All ${svc.length} services running`);
 
   $('jobs').innerHTML = svc.map(j => {
+    BOX_OF[j.unit] = j.box || 1;
     const [cls, label] = pill(j);
     const open = OPEN.has(j.unit);
     const r = j.restarts ? ` · restarts <b>${j.restarts}</b>` : '';
+    const vm = j.box === 2 ? ' · detect vm' : '';
     return `<div class="job${j.active!=='active'?' down':''}${open?' open':''}" data-unit="${j.unit}">
       <div class="hd" data-t="${j.unit}">
         <span class="caret">▶</span>
-        <span class="who"><div class="nm">${esc(j.desc||j.unit)}</div><div class="unit mono">${j.unit}${j.pid?' · pid '+j.pid:''}</div></span>
+        <span class="who"><div class="nm">${esc(j.desc||j.unit)}</div><div class="unit mono">${j.unit}${vm}${j.pid?' · pid '+j.pid:''}</div></span>
         <span class="${cls}">${esc(label)}</span>
       </div>
       <div class="meta">
@@ -242,7 +245,7 @@ async function loadLogs(unit){
   const el = document.querySelector(`[data-full="${unit}"]`);
   if (!el) return;
   try {
-    const d = await get('/api/jobs/logs?unit=' + encodeURIComponent(unit) + '&n=300');
+    const d = await get((LOG_EP[BOX_OF[unit]] || '/api/jobs/logs') + '?unit=' + encodeURIComponent(unit) + '&n=300');
     const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
     el.innerHTML = logHtml(d.lines) || '<span class="t">no log entries</span>';
     if (atBottom) el.scrollTop = el.scrollHeight;     // keep pinned to newest unless scrolled up
@@ -256,10 +259,13 @@ function toggle(unit){
 
 async function load(){
   try {
-    const d = await get('/api/jobs');
+    // recorder jobs are the auth gate; host + detect stats are soft (an offline box never blanks the page)
+    const [jobs, host, det] = await Promise.all([get('/api/jobs'), getSoft('/api/host'), getSoft('/detapi/stats')]);
     $('auth').hidden = true; $('err').hidden = true;
-    render(d);
-    loadVMs();                              // independent of jobs; a slow/offline VM never blocks the list
+    const svc = (jobs.services || []).map(s => ({...s, box: 1}))
+            .concat(((det && det.services) || []).map(s => ({...s, box: 2})));
+    render({services: svc, now: jobs.now});
+    renderVMs(host, det);
   } catch (e){
     if (e === 'auth'){ $('auth').hidden = false; $('status').hidden = true; $('jobs').innerHTML = ''; }
     else { $('err').hidden = false; $('err').textContent = 'Could not load jobs — ' + e; }
