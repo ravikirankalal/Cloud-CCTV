@@ -168,19 +168,19 @@ def group(rep_id, frm=None, to=None):
     return {"grp": grp, "detections": dets}
 
 
-def det_times(frm, to, binw=30):
-    """Presence marks for the live-page timeline: the epoch bin-starts (binw-second buckets) in
-    [frm,to) that hold at least one real detection. Hidden ('not a person') crops are excluded;
-    unknown (identity NULL) and known people are kept. Binning bounds the payload to <=1 row per
-    bucket (~2880/day) so the query stays cheap and the JSON small."""
+def det_times(frm, to):
+    """Presence spans for the live-page timeline: [ts_start, ts_end] for each real detection whose ts is
+    in [frm,to). In track mode one row spans a whole visit; older per-frame rows collapse to a point
+    (NVL to ts). Hidden ('not a person') crops are excluded; unknown (identity NULL) and known are kept.
+    Capped so a dense legacy day can't bloat the payload."""
     def q(cur):
-        cur.execute("""SELECT DISTINCT FLOOR(ts / :bw) * :bw b FROM detections
+        cur.execute("""SELECT NVL(ts_start, ts), NVL(ts_end, ts) FROM detections
                        WHERE ts >= :frm AND ts < :tto
                          AND (identity_id IS NULL OR identity_id NOT IN
                               (SELECT id FROM identities WHERE kind = 'hidden'))
-                       ORDER BY b""", {"bw": binw, "frm": frm, "tto": to})
-        return [int(r[0]) for r in cur.fetchall()]
-    return {"bins": db(q), "w": binw}
+                       ORDER BY NVL(ts_start, ts) FETCH FIRST 5000 ROWS ONLY""", {"frm": frm, "tto": to})
+        return [[float(a), float(b)] for a, b in cur.fetchall()]
+    return {"spans": db(q)}
 
 
 def unassign(det_ids):

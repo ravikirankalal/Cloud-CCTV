@@ -451,7 +451,7 @@ async function loadSpans() {
   if (st.detDay !== st.day || Date.now() - (st.detAt || 0) > 15000) {
     st.detDay = st.day; st.detAt = Date.now();
     try { const r = await fetch('/detapi/times?' + new URLSearchParams({ from: t0, to: t1 }), { cache: 'no-store' });
-          if (r.ok) { const j = await r.json(); st.dets = j.bins || []; st.detW = j.w || 30; } } catch {}
+          if (r.ok) { const j = await r.json(); st.dets = j.spans || []; } } catch {}
   }
   if (req !== spanReq) return;                                   // a newer load superseded this one
   st.spans = spans; st.card = card; st.offline = offline;
@@ -490,9 +490,8 @@ function draw() {
   // Each bin is a [start, start+w] span, coalesced to pixel runs so dense sightings read as a solid
   // band and a lone one still shows as a visible tick.
   if ((st.dets || []).length) {
-    const dw = st.detW || 30, runs = [];
-    for (const s of st.dets) {
-      const e = s + dw;
+    const runs = [];
+    for (const [s, e] of st.dets) {
       if (e <= a || s >= b) continue;
       const x0 = Math.max(0, x(s)), x1 = Math.min(w, x(e));
       if (runs.length && x0 <= runs[runs.length - 1][1] + 0.6) runs[runs.length - 1][1] = Math.max(runs[runs.length - 1][1], x1);
