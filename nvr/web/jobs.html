@@ -78,6 +78,22 @@ header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2p
 .log .t{color:var(--faint)}
 .log.tail{max-height:none;color:var(--muted)}
 .foot{color:var(--faint);font-size:12px;text-align:center;margin:18px 2px 0;font-variant-numeric:tabular-nums}
+.vms{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:14px 2px 18px}
+@media (max-width:560px){.vms{grid-template-columns:1fr}}
+.vm{background:var(--panel);border:1px solid var(--line);border-radius:var(--radius);padding:13px 15px}
+.vm.warn{border-color:var(--line2)}
+.vm.bad{border-color:rgba(210,112,90,.4)}
+.vmhd{display:flex;align-items:baseline;gap:8px;margin-bottom:9px}
+.vmnm{font-family:"Bricolage Grotesque",serif;font-weight:600;font-size:15px;letter-spacing:-.01em}
+.vmsub{font-size:11.5px;color:var(--faint);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.vmdot{width:7px;height:7px;border-radius:50%;background:var(--good);margin-left:auto;flex:none}
+.vmdot.warn{background:var(--amber)}
+.vmdot.bad{background:var(--rust);box-shadow:0 0 0 4px rgba(210,112,90,.16)}
+.vmrow{display:flex;justify-content:space-between;gap:10px;padding:3px 0;font-size:13px;color:var(--muted);font-variant-numeric:tabular-nums}
+.vmrow b{color:var(--text);font-weight:600}
+.vmrow b.hot{color:var(--rust)}
+.vmrow .u{color:var(--faint);font-weight:400;font-size:12px}
+.vm .lag{margin-top:8px;padding-top:9px;border-top:1px solid var(--line)}
 @media (prefers-reduced-motion:reduce){
   *{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
 }
@@ -91,6 +107,7 @@ header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2p
     <button class="ghost" id="refresh">Refresh</button>
   </header>
   <div class="status" id="status" hidden></div>
+  <div class="vms" id="vms" hidden></div>
   <div id="auth" class="note" hidden>You're not signed in. Open the <a href="/">live view</a> to sign in, then come back.</div>
   <div id="err" class="note" hidden></div>
   <div class="jobs" id="jobs"></div>
@@ -122,6 +139,42 @@ function dur(s){
 }
 const OPEN = new Set();                 // units whose full logs are expanded
 let TIMER = null;
+
+// ---- machine cards (both VMs): load / memory / disk / uptime, plus detector lag on the detect box ----
+async function getSoft(p){ try { return await get(p); } catch { return null; } }  // one VM down ≠ page down
+
+function vmCard(title, sub, d){
+  if (!d || !d.host){
+    return `<div class="vm bad"><div class="vmhd"><span class="vmnm">${title}</span>`+
+      `<span class="vmsub">${sub}</span><span class="vmdot bad"></span></div>`+
+      `<div class="vmrow"><span>unreachable</span><span>—</span></div></div>`;
+  }
+  const h = d.host, det = d.detect, ncpu = h.ncpu || 1, l1 = h.load ? h.load[0] : null;
+  const loadHot = l1 != null && l1 > ncpu * 1.5, loadWarn = l1 != null && l1 > ncpu * 0.9;
+  const memWarn = h.mem_total_mb && h.mem_used_mb / h.mem_total_mb > 0.9;
+  const lagWarn = det && det.lag_s != null && det.lag_s > 120;
+  const lagBad  = det && det.lag_s != null && det.lag_s > 900;
+  const bad = loadHot || lagBad, warn = loadWarn || memWarn || lagWarn;
+  const tone = bad ? 'bad' : (warn ? 'warn' : '');
+  const rows =
+    `<div class="vmrow"><span>load</span><span><b class="${loadHot?'hot':''}">${l1!=null?l1.toFixed(2):'—'}</b> <span class="u">/ ${ncpu} cpu</span></span></div>`+
+    `<div class="vmrow"><span>mem</span><span><b>${h.mem_used_mb??'—'}</b> <span class="u">/ ${h.mem_total_mb??'—'} MB</span></span></div>`+
+    `<div class="vmrow"><span>disk</span><span><b>${h.disk_used_gb??'—'}</b> <span class="u">/ ${h.disk_total_gb??'—'} GB</span></span></div>`+
+    `<div class="vmrow"><span>uptime</span><span><b>${dur(h.uptime_s)}</b></span></div>`;
+  const lag = det
+    ? `<div class="vmrow lag"><span>detector lag</span><span><b class="${lagBad?'hot':''}">${det.lag_s!=null?dur(det.lag_s):'—'}</b> <span class="u">· ${det.backlog??'—'} segs</span></span></div>`
+    : '';
+  return `<div class="vm ${tone}"><div class="vmhd"><span class="vmnm">${title}</span>`+
+    `<span class="vmsub">${sub}</span><span class="vmdot ${tone}"></span></div>${rows}${lag}</div>`;
+}
+
+async function loadVMs(){
+  const [rec, det] = await Promise.all([getSoft('/api/host'), getSoft('/detapi/stats')]);
+  if (!rec && !det){ $('vms').hidden = true; return; }
+  $('vms').hidden = false;
+  $('vms').innerHTML = vmCard('Recorder', 'recorder + site', rec)
+                     + vmCard('Detection', 'detector + people API', det);
+}
 
 // one log line = leading ISO timestamp (dimmed) + message
 function logHtml(lines){
@@ -205,6 +258,7 @@ async function load(){
     const d = await get('/api/jobs');
     $('auth').hidden = true; $('err').hidden = true;
     render(d);
+    loadVMs();                              // independent of jobs; a slow/offline VM never blocks the list
   } catch (e){
     if (e === 'auth'){ $('auth').hidden = false; $('status').hidden = true; $('jobs').innerHTML = ''; }
     else { $('err').hidden = false; $('err').textContent = 'Could not load jobs — ' + e; }

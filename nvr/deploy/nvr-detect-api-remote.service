@@ -14,6 +14,10 @@ Environment=ADB_WALLET=/home/ubuntu/nvr/adb-wallet
 Environment=NVR_CROPS=/home/ubuntu/nvr-data/crops
 Environment=DETAPI_PORT=3401
 Environment=DETAPI_HOST=0.0.0.0
+# NFS-mounted static snapshot + presence stream: lets /detapi/stats report the poller's lag behind the
+# recorder. Read-only, immutable, short timeout — the live recorder DB is never touched from here.
+Environment=NVR_DB_PATH=/mnt/nvr1/nvr-snap.db
+Environment=NVR_STREAM=cam1-sd
 ExecStart=/home/ubuntu/nvr/venv-detect/bin/python /home/ubuntu/nvr/detect_api.py
 Restart=always
 RestartSec=10

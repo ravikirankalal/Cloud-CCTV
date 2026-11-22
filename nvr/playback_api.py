@@ -12,6 +12,7 @@ NVR API: playlists, coverage and exports, all from the recorder's SQLite index.
   GET /api/live.m3u8?stream                HLS live playlist: the newest LIVE_SEGS segments
   GET /api/export.mp4?stream&from&to       one MP4 of [from, to] (stream copy, no re-encode)
   GET /api/status                          recorder health: newest segment, disk
+  GET /api/host                            recorder VM: load, memory, disk, uptime
 
 Segments are served by nginx from /media/ (DATA on disk). Playlists carry PROGRAM-DATE-TIME
 on every segment, and a DISCONTINUITY (with the new init segment) wherever there's a gap
@@ -29,6 +30,8 @@ import time
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlparse
+
+import hoststat
 
 DATA = os.environ.get("NVR_DATA", "/home/ubuntu/nvr-data")
 PORT = int(os.environ.get("PORT", "3400"))
@@ -278,6 +281,8 @@ class H(BaseHTTPRequestHandler):
                     "disk_free_gb": round(du.free / 1e9, 1), "disk_total_gb": round(du.total / 1e9, 1)}))
             if u.path == "/api/export.mp4":
                 return self.export(*self.args(q, limit=MAX_EXPORT))
+            if u.path == "/api/host":                 # recorder VM stats for the ops dashboard
+                return self.send(200, json.dumps({"role": "recorder", "host": hoststat.host_stats()}))
             if u.path == "/api/jobs":
                 return self.send(200, json.dumps({"now": time.time(),
                                                   "services": [job_status(un) for un, _ in JOBS]}))
