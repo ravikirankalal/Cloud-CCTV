@@ -74,6 +74,8 @@ header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2p
 .thumb .sc{position:absolute;left:4px;bottom:4px;font-size:10.5px;font-variant-numeric:tabular-nums;
   background:rgba(9,15,14,.8);padding:1px 6px;border-radius:7px;color:var(--text)}
 .thumb .bad{position:absolute;left:4px;top:4px;font-size:10px;font-weight:600;background:var(--rust);color:#fff;padding:1px 6px;border-radius:7px}
+.thumb .man{position:absolute;left:4px;top:4px;font-size:10px;font-weight:700;background:var(--good);color:#06120b;padding:1px 6px;border-radius:7px}
+.ghost{background:transparent;color:var(--muted)}
 .thumb.sel{outline:2.5px solid var(--amber);outline-offset:-2.5px}
 .thumb .chk{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;background:rgba(9,15,14,.65);
   border:1.5px solid rgba(255,255,255,.5);display:none;align-items:center;justify-content:center;color:#fff;font-size:13px}
@@ -105,8 +107,10 @@ body.sel .thumb .chk{display:inline-flex}
   <!-- LIST -->
   <section id="listView">
     <div class="note">These are the <b>manually-tagged</b> crops that train re-ID. Blurry, low-confidence and
-      extreme close-up crops are <b>auto-excluded</b> (dimmed). Open a person to prune wrong or poor crops —
-      removing one drops it back to the Unknown pool and rebuilds that person's gallery.</div>
+      extreme close-up crops are <b>auto-excluded</b> (dimmed). Open a person, then <b>Select</b> crops to
+      <b>pick</b> them for training: <b>Use</b> forces a crop in, <b>Exclude</b> keeps the person but drops
+      it from training, <b>Auto</b> hands it back to the filter, and <b>Remove</b> sends a wrong crop back to
+      the Unknown pool. Every change rebuilds that person's gallery.</div>
     <div class="people" id="people"></div>
   </section>
 
@@ -121,7 +125,14 @@ body.sel .thumb .chk{display:inline-flex}
       </div>
       <div class="spacer"></div>
       <button id="selBtn">Select</button>
-      <button id="rmBtn" class="danger" hidden>Remove (0)</button>
+    </div>
+    <div class="bar" id="actions" hidden>
+      <span class="pill" id="selcount">0 selected</span>
+      <div class="spacer"></div>
+      <button id="useBtn" title="Force these into the training gallery">Use&nbsp;✓</button>
+      <button id="offBtn" title="Keep this person, but exclude from training">Exclude</button>
+      <button id="autoBtn" class="ghost" title="Back to automatic quality filter">Auto</button>
+      <button id="rmBtn" class="danger" title="Not this person — back to the unknown pool">Remove</button>
     </div>
     <div class="crops" id="crops"></div>
     <div class="empty" id="dempty" hidden>No crops here.</div>
@@ -136,7 +147,13 @@ const api=p=>fetch(p).then(r=>r.ok?r.json():Promise.reject(r.status));
 const post=(p,b)=>fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.ok?r.json():Promise.reject(r.status));
 let toastT;
 function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200);}
-function reason(d){if(d.used)return null;if(d.score!=null&&d.score<0.5)return 'low';if(d.focus!=null&&d.focus<0.08)return 'blur';if(d.boxfrac!=null&&d.boxfrac>0.75)return 'zoom';return 'out';}
+function badge(d){
+  if(d.pick===1)return{c:'man',t:'✓ kept'};
+  if(d.pick===0)return{c:'bad',t:'off'};
+  if(d.used)return null;
+  const t=d.score!=null&&d.score<0.5?'low':(d.focus!=null&&d.focus<0.08?'blur':(d.boxfrac!=null&&d.boxfrac>0.75?'zoom':'out'));
+  return{c:'bad',t};
+}
 
 let st={view:'list',person:null,dets:[],filter:'all',selecting:false,sel:new Set()};
 
@@ -175,32 +192,40 @@ function renderCrops(){
   const list=st.dets.filter(d=>f==='all'||(f==='train'&&d.used)||(f==='excluded'&&!d.used));
   $('dempty').hidden=list.length>0;
   $('crops').innerHTML=list.map(d=>{
-    const r=reason(d);
+    const b=badge(d);
     return `<div class="thumb ${d.used?'':'ex'} ${st.sel.has(d.id)?'sel':''}" data-id="${d.id}">
       <img src="${cropUrl(d.id)}" loading="lazy" onerror="this.closest('.thumb').remove()">
       <span class="sc">${d.score!=null?d.score.toFixed(2):'–'}</span>
-      ${r?`<span class="bad">${r}</span>`:''}
+      ${b?`<span class="${b.c}">${b.t}</span>`:''}
       <span class="chk">✓</span></div>`;}).join('');
   $('crops').querySelectorAll('.thumb').forEach(t=>t.onclick=()=>tapThumb(+t.dataset.id));
 }
 function tapThumb(id){
-  if(!st.selecting){st.selecting=true;document.body.classList.add('sel');$('selBtn').textContent='Cancel';}
+  if(!st.selecting)enterSelect();
   if(st.sel.has(id))st.sel.delete(id);else st.sel.add(id);
-  renderCrops();updateRm();
+  renderCrops();updateActions();
 }
-function updateRm(){const n=st.sel.size;const b=$('rmBtn');b.hidden=!st.selecting;b.textContent=`Remove (${n})`;b.disabled=!n;}
-function exitSelect(){st.selecting=false;st.sel.clear();document.body.classList.remove('sel');$('selBtn').textContent='Select';$('rmBtn').hidden=true;}
-$('selBtn').onclick=()=>{if(st.selecting)exitSelect();else{st.selecting=true;document.body.classList.add('sel');$('selBtn').textContent='Cancel';updateRm();}};
-$('rmBtn').onclick=async()=>{
+function enterSelect(){st.selecting=true;document.body.classList.add('sel');$('selBtn').textContent='Cancel';$('actions').hidden=false;updateActions();}
+function exitSelect(){st.selecting=false;st.sel.clear();document.body.classList.remove('sel');$('selBtn').textContent='Select';$('actions').hidden=true;}
+function updateActions(){
+  const n=st.sel.size;$('selcount').textContent=n+' selected';
+  ['useBtn','offBtn','autoBtn','rmBtn'].forEach(b=>$(b).disabled=!n);
+}
+$('selBtn').onclick=()=>{if(st.selecting)exitSelect();else enterSelect();};
+async function act(btn,fn,msg){
   const ids=[...st.sel];if(!ids.length)return;
-  $('rmBtn').classList.add('busy');
-  try{await post('/detapi/unassign',{ids});
-    st.dets=st.dets.filter(d=>!st.sel.has(d.id));
-    toast(ids.length+' removed from training');
-    exitSelect();renderStats();renderCrops();
-  }catch(e){toast('Remove failed ('+e+')');}
-  $('rmBtn').classList.remove('busy');updateRm();
-};
+  $(btn).classList.add('busy');
+  try{await fn(ids);toast(msg(ids.length));exitSelect();renderStats();renderCrops();}
+  catch(e){toast('Failed ('+e+')');}
+  $(btn).classList.remove('busy');
+}
+function setpick(ids,pick){return post('/detapi/train_pick',{ids,pick}).then(()=>{
+  st.dets.forEach(d=>{if(ids.includes(d.id)){d.pick=pick;d.used=(pick===1)?true:(pick===0?false:autoUsed(d));}});});}
+function autoUsed(d){return !((d.score!=null&&d.score<0.5)||(d.focus!=null&&d.focus<0.08)||(d.boxfrac!=null&&d.boxfrac>0.75));}
+$('useBtn').onclick =()=>act('useBtn', ids=>setpick(ids,1),   n=>n+' set to always train');
+$('offBtn').onclick =()=>act('offBtn', ids=>setpick(ids,0),   n=>n+' excluded from training');
+$('autoBtn').onclick=()=>act('autoBtn',ids=>setpick(ids,null),n=>n+' back to auto');
+$('rmBtn').onclick  =()=>act('rmBtn', ids=>post('/detapi/unassign',{ids}).then(()=>{st.dets=st.dets.filter(d=>!ids.includes(d.id));}), n=>n+' removed from '+(st.person.name||'person'));
 $('filter').querySelectorAll('button').forEach(b=>b.onclick=()=>{
   st.filter=b.dataset.f;$('filter').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderCrops();});
 function toList(){st.view='list';st.person=null;exitSelect();$('detailView').hidden=true;$('listView').hidden=false;

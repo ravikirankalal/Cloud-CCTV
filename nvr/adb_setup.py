@@ -51,6 +51,7 @@ ddl("""CREATE TABLE detections (
   ts_end      NUMBER,
   focus       BINARY_FLOAT,    -- crop sharpness (detect.focus_score); training gate drops blurry crops
   boxfrac     BINARY_FLOAT,    -- box size / frame (0..1); training gate drops extreme close-ups
+  train_pick  NUMBER(1),       -- manual training override: 1=force into gallery, 0=force out, NULL=auto gate
   created     TIMESTAMP DEFAULT SYSTIMESTAMP
 )""")
 
