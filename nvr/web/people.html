@@ -121,6 +121,14 @@ body.selecting .thumb .chk{display:inline-flex}
 .psheet .thumb .chk{display:none}
 .psheet .thumb.sel{outline-color:var(--rust)}
 .psheet .thumb.sel .chk{display:inline-flex;background:var(--rust);border-color:var(--rust);color:#fff}
+/* per-crop training toggle (person sheet): ★ = seeds the gallery, tap to add/remove training */
+.thumb .tbtn{position:absolute;right:5px;bottom:5px;width:25px;height:25px;border-radius:50%;z-index:2;
+  display:flex;align-items:center;justify-content:center;font-size:13px;cursor:pointer;line-height:1;
+  background:rgba(9,15,14,.62);backdrop-filter:blur(6px);border:1px solid rgba(255,255,255,.3);color:#fff}
+.thumb .tbtn.on{background:var(--amber);border-color:var(--amber);color:var(--amber-ink)}
+.thumb .tbtn.busy{opacity:.5;pointer-events:none}
+.thumb .tauto{position:absolute;right:5px;bottom:5px;z-index:2;font-size:9.5px;font-weight:600;letter-spacing:.03em;
+  padding:3px 6px;border-radius:7px;background:rgba(9,15,14,.72);color:var(--muted);text-transform:uppercase}
 .datebar{display:flex;align-items:center;gap:8px;margin:0 2px 20px}
 .datebar .icon{width:40px;min-height:40px;padding:0;font-size:18px;line-height:1}
 .datebar .dlabel{flex:1;text-align:center;font-weight:600;font-size:14px;cursor:pointer;user-select:none;
@@ -460,10 +468,11 @@ async function openDetail(o){
   let data;
   try{ data = await api.get((isP ? '/detapi/person?id=' : '/detapi/group?id=') + o.id + dayQuery().replace('?','&')); }
   catch(e){ $('pcrops').innerHTML = `<div class="empty">${e==='auth'?'Sign in first':'Could not load images'}</div>`; return; }
-  const dets = data.detections || [];
+  let dets = data.detections || [];
   const RM = new Set();
   const noun = isP ? `that aren't ${esc(curName)}` : `that don't belong`;
-  const base = () => dets.length ? `${dets.length} image${dets.length===1?'':'s'} · tap any ${noun} to remove` : 'No images.';
+  const base = () => !dets.length ? 'No images.'
+    : `${dets.length} image${dets.length===1?'':'s'} · tap any ${noun} to remove${isP?' · ★ picks for training':''}`;
   function upd(){
     const n = RM.size;
     const btn = $('premove'); btn.hidden = n===0; btn.textContent = `Remove ${n}`;
@@ -477,6 +486,9 @@ async function openDetail(o){
         <span class="chk">✕</span>
         <span class="play" data-t="${Math.floor(d.ts)}" role="link" title="Watch the recording at this moment">▶</span>
         <span class="sc mono">${tileWhen(d.ts)}</span>
+        ${isP ? (d.confirmed
+          ? `<span class="tbtn${d.trained?' on':''}" data-train="${d.id}" title="${d.trained?'Picked for training — tap to remove':'Tap to add to training'}">${d.trained?'★':'☆'}</span>`
+          : `<span class="tauto" title="Auto-detected — confirm it as this person before it can train">auto</span>`) : ''}
       </button>`).join('') : '<div class="empty">No images.</div>';
     g.querySelectorAll('.thumb').forEach(b => {
       const img = b.querySelector('img'); if(img) hideBroken(img);
@@ -494,12 +506,29 @@ async function openDetail(o){
         } catch {}
         location.href = '/?t=' + t;                           // opened People directly: cold deep-link /?t=<epoch>
       });
+      const tbtn = b.querySelector('.tbtn');
+      if(tbtn) tbtn.addEventListener('click', async e => {     // toggle this crop in/out of the training gallery
+        e.stopPropagation();                                   // not a remove-select
+        if(tbtn.classList.contains('busy')) return;
+        const id = parseInt(tbtn.dataset.train);
+        const d = dets.find(x => x.id===id); if(!d) return;
+        tbtn.classList.add('busy');
+        try{ await api.post('/detapi/train_pick', {ids:[id], pick: d.trained ? 0 : 1});
+          toast(d.trained ? 'Removed from training' : 'Added to training');
+          DIRTY = true; await reload();                        // re-fetch: the gallery fallback can flip OTHER crops too
+        }catch(err){ toast(err==='auth'?'Sign in first':'Failed', true); tbtn.classList.remove('busy'); }
+      });
       b.addEventListener('click', () => {
         const id = parseInt(b.dataset.id);
         RM.has(id) ? RM.delete(id) : RM.add(id);
         b.classList.toggle('sel'); upd();
       });
     });
+  }
+  async function reload(){                                     // refresh crops + training marks from the server
+    try{ const d = await api.get('/detapi/person?id=' + o.id + dayQuery().replace('?','&'));
+      dets = d.detections || []; }catch(e){}
+    RM.clear(); draw(); upd();
   }
   draw(); upd();
 

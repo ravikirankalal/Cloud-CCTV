@@ -163,17 +163,24 @@ def person(ident_id, frm=None, to=None):
     def q(cur):
         cur.execute("SELECT name FROM identities WHERE id = :1", [ident_id])
         nm = cur.fetchone()
+        # trained set over ALL confirmed crops (any date) — the gallery is date-independent, so the
+        # 'picked for training' marker must not depend on the day the detail was opened from.
+        cur.execute("""SELECT id, score, focus, boxfrac, train_pick FROM detections
+                       WHERE identity_id = :1 AND confirmed = 1""", [ident_id])
+        tids = _trained_ids(cur.fetchall())
         if ranged:
-            cur.execute("""SELECT id, ts, score FROM detections WHERE identity_id = :1
+            cur.execute("""SELECT id, ts, score, confirmed, train_pick FROM detections WHERE identity_id = :1
                            AND ts >= :2 AND ts < :3
                            ORDER BY confirmed DESC, ts DESC FETCH FIRST 500 ROWS ONLY""", [ident_id, frm, to])
         else:
-            cur.execute("""SELECT id, ts, score FROM detections WHERE identity_id = :1
+            cur.execute("""SELECT id, ts, score, confirmed, train_pick FROM detections WHERE identity_id = :1
                            ORDER BY confirmed DESC, ts DESC FETCH FIRST 500 ROWS ONLY""", [ident_id])
-        return (nm[0] if nm else None), cur.fetchall()
-    name, rows = db(q)
-    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2) if s is not None else None}
-            for d, t, s in rows if has_crop(int(d))]
+        return (nm[0] if nm else None), tids, cur.fetchall()
+    name, tids, rows = db(q)
+    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2) if s is not None else None,
+             "confirmed": int(c or 0), "pick": (int(p) if p is not None else None),
+             "trained": int(d) in tids}
+            for d, t, s, c, p in rows if has_crop(int(d))]
     return {"name": name, "detections": dets}
 
 
