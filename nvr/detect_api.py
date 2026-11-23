@@ -102,8 +102,12 @@ def has_crop(det_id):
 
 def _cover(cur, ident_id):
     """The user-chosen cover crop for an identity (identities.cover_id), or None to fall back to an
-    auto-picked sample. None if the chosen crop's file is gone."""
-    cur.execute("SELECT cover_id FROM identities WHERE id = :1", [ident_id])
+    auto-picked sample. None if cover_id is unset, its file is gone, or the crop no longer belongs to
+    this person (e.g. it was later unassigned or re-tagged to someone else) — the JOIN enforces that so
+    a stale cover_id can never surface a crop that is now in the unknown pool or on another identity."""
+    cur.execute("""SELECT i.cover_id FROM identities i
+                   JOIN detections d ON d.id = i.cover_id AND d.identity_id = i.id AND d.confirmed = 1
+                   WHERE i.id = :1""", [ident_id])
     r = cur.fetchone()
     cid = int(r[0]) if r and r[0] is not None else None
     return cid if (cid is not None and has_crop(cid)) else None
@@ -219,12 +223,13 @@ def training_person(ident_id):
     """One person's full TRAINING set (every manually-confirmed crop, all dates) with the quality signals
     and whether each actually trains, so the user can prune blurry / zoomed / wrong crops from the gallery."""
     def q(cur):
-        cur.execute("SELECT name, cover_id FROM identities WHERE id = :1", [ident_id])
+        cur.execute("SELECT name FROM identities WHERE id = :1", [ident_id])
         nm = cur.fetchone()
+        cover = _cover(cur, ident_id)          # validated: never a dangling / foreign crop id
         cur.execute("""SELECT id, ts, score, focus, boxfrac, train_pick FROM detections
                        WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC
                        FETCH FIRST 1500 ROWS ONLY""", [ident_id])
-        return (nm[0] if nm else None), (int(nm[1]) if nm and nm[1] is not None else None), cur.fetchall()
+        return (nm[0] if nm else None), cover, cur.fetchall()
     name, cover, rows = db(q)
     dets = []
     for d, t, s, f, b, p in rows:

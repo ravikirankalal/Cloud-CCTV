@@ -230,7 +230,7 @@ function autoUsed(d){return !((d.score!=null&&d.score<0.5)||(d.focus!=null&&d.fo
 $('useBtn').onclick =()=>act('useBtn', ids=>setpick(ids,1),   n=>n+' set to always train');
 $('offBtn').onclick =()=>act('offBtn', ids=>setpick(ids,0),   n=>n+' excluded from training');
 $('autoBtn').onclick=()=>act('autoBtn',ids=>setpick(ids,null),n=>n+' back to auto');
-$('rmBtn').onclick  =()=>act('rmBtn', ids=>post('/detapi/unassign',{ids}).then(()=>{st.dets=st.dets.filter(d=>!ids.includes(d.id));}), n=>n+' removed from '+(st.person.name||'person'));
+$('rmBtn').onclick  =()=>act('rmBtn', ids=>post('/detapi/unassign',{ids}).then(()=>{st.dets=st.dets.filter(d=>!ids.includes(d.id));}), n=>n+' removed from '+((st.person&&st.person.name)||'person'));
 $('coverBtn').onclick=()=>{if(st.sel.size!==1)return;act('coverBtn', ids=>post('/detapi/set_cover',{id:st.person.id,det:ids[0]}).then(()=>{st.cover=ids[0];}), ()=>'cover set');};
 $('filter').querySelectorAll('button').forEach(b=>b.onclick=()=>{
   st.filter=b.dataset.f;$('filter').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderCrops();});
