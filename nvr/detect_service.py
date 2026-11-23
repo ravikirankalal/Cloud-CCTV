@@ -28,7 +28,9 @@ BATCH = int(os.environ.get("DET_BATCH", "25"))           # segments per loop bef
 IDLE = int(os.environ.get("DET_IDLE", "15"))             # sleep seconds when caught up
 RETRY = int(os.environ.get("DET_RETRY", "30"))           # sleep before reconnecting to Oracle after a DB error
 MATCH_DIST = float(os.environ.get("DET_MATCH", "0.28"))  # cosine distance < this => same known person
-CLUSTER_DIST = float(os.environ.get("DET_CLUSTER", "0.28"))  # cosine distance to group unknowns together
+CLUSTER_DIST = float(os.environ.get("DET_CLUSTER", "0.26"))  # avg-linkage: group unknowns whose MEAN cosine
+#   similarity >= 1 - CLUSTER_DIST (0.74). On the weak SD embeddings a looser cut (<0.66) collapses the dense
+#   core into one mixed blob; 0.74 keeps groups PURE (biggest stays ~coherent, intra-sim ~0.77) and taggable.
 # CROP_DIR / BG_PATH default under DATA, but are overridable so a remote detector (DATA = a read-only
 # mount of the recorder's segments) can still WRITE its crops + gate model to a local, writable path.
 CROP_DIR = os.environ.get("NVR_CROPS") or os.path.join(DATA, "crops")   # static person-crop jpegs
@@ -332,52 +334,65 @@ def make_finalize(nvr_h, cur, pres_wh_box, stats):
 
 
 def _cluster(cur):
-    """Group the still-UNKNOWN detections (identity_id IS NULL) by re-ID similarity so the UI can show
-    one tile per person instead of a tile per frame. CONNECTED COMPONENTS over L2-normalized OSNet
-    embeddings (pure vector math): two detections within CLUSTER_DIST are linked, and the link is
-    transitive, so a person drifting across poses/time collapses into ONE group even when the first
-    and last frame aren't themselves within threshold. Group id = smallest member id. Returns the
-    number of groups. Light; safe to re-run.
+    """Group the still-UNKNOWN detections (identity_id IS NULL) by re-ID similarity so the UI shows one
+    tile per person instead of a tile per frame. AVERAGE-LINKAGE agglomerative over L2-normalized OSNet
+    embeddings: repeatedly merge the two groups with the highest MEAN pairwise cosine similarity, while
+    that mean is >= (1 - CLUSTER_DIST). Group id = smallest member id. Returns the number of groups.
 
-    Only confirmed=0 unknowns are (re)grouped. A detection the user manually split out of a group
-    (match.unassign sets confirmed=1, cluster_id=id) is PINNED: it's excluded from the graph here and
-    keeps its own cluster_id, so the separation is remembered across every later pass instead of being
-    re-merged by embedding."""
+    Why average-linkage and not connected-components (single-linkage): single-linkage merges two groups
+    as soon as ANY one pair is within threshold, so a single borderline/ambiguous crop bridges two
+    different people and the link is transitive — on low-res SD embeddings that CHAINS dozens of distinct
+    people into one giant mixed group (measured: 89 detections, median pairwise sim 0.53, all chained at
+    0.72). Average-linkage needs the groups to be similar ON AVERAGE, so a lone bridge can't fuse them;
+    the result is many smaller but PURE groups, which the UI can actually tag (a mixed group can't be).
+
+    Only confirmed=0 unknowns are (re)grouped. A detection the user manually split out (match.unassign:
+    confirmed=1, cluster_id=id) is PINNED — excluded here and keeps its own cluster_id, so the split
+    sticks across passes instead of being re-merged by embedding.
+
+    O(n^3) worst case but numpy-vectorized per merge; the unknown pool is self-limiting (rows get tagged
+    or dismissed), so n is hundreds in practice."""
     cur.execute("SELECT id, embedding FROM detections WHERE identity_id IS NULL "
                 "AND (confirmed = 0 OR confirmed IS NULL) ORDER BY id")
     rows = cur.fetchall()
     if not rows:
         return 0
     ids = [int(r[0]) for r in rows]
-    E = np.asarray([np.asarray(r[1], dtype=np.float32) for r in rows])  # n x 512, already unit-norm
+    E = np.asarray([np.asarray(r[1], dtype=np.float32) for r in rows])  # n x 512
+    E /= np.linalg.norm(E, axis=1, keepdims=True) + 1e-9                # defensive renorm -> cosine via dot
     n = len(ids)
-    sim = E @ E.T                               # cosine similarity (unit vectors); distance = 1 - sim
-    parent = list(range(n))
-
-    def find(x):
-        while parent[x] != x:
-            parent[x] = parent[parent[x]]
-            x = parent[x]
-        return x
-
     thr = 1.0 - CLUSTER_DIST
-    for i in range(n):
-        for j in np.where(sim[i] >= thr)[0]:    # neighbors within CLUSTER_DIST
-            j = int(j)
-            if j > i:
-                ri, rj = find(i), find(j)
-                if ri != rj:
-                    parent[max(ri, rj)] = min(ri, rj)   # union, keep the lower index as root
-
-    comp = {}
-    for i in range(n):
-        comp.setdefault(find(i), []).append(i)
+    sim = (E @ E.T).astype(np.float64)
+    S = sim.copy()                              # S[a,b] = SUM of member-member sims between groups a and b
+    size = np.ones(n)
+    alive = np.ones(n, dtype=bool)
+    members = [[i] for i in range(n)]
+    while True:
+        avg = S / np.outer(size, size)          # mean pairwise sim between every pair of live groups
+        np.fill_diagonal(avg, -1.0)
+        avg[~alive] = -1.0
+        avg[:, ~alive] = -1.0
+        a, b = np.unravel_index(int(np.argmax(avg)), avg.shape)
+        if avg[a, b] < thr:
+            break                               # no pair of groups is similar enough on average
+        if b < a:
+            a, b = b, a
+        S[a] += S[b]                            # fold group b into a (sums add; sizes add)
+        S[:, a] += S[:, b]
+        size[a] += size[b]
+        alive[b] = False
+        members[a] += members[b]
+        members[b] = []
     updates = []
-    for members in comp.values():
-        cid = min(ids[m] for m in members)      # stable group id: smallest detection id in the group
-        updates.extend((cid, ids[m]) for m in members)
+    ngroups = 0
+    for m in members:
+        if not m:
+            continue
+        ngroups += 1
+        cid = min(ids[k] for k in m)            # stable group id: smallest detection id in the group
+        updates.extend((cid, ids[k]) for k in m)
     cur.executemany("UPDATE detections SET cluster_id = :1 WHERE id = :2", updates)
-    return len(comp)
+    return ngroups
 
 
 def cluster_unknowns():
