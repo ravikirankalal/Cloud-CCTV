@@ -70,7 +70,7 @@ def rebuild_protos(cur, identity_id=None):
             # A MANUAL PICK overrides the gate: train_pick=1 forces a crop IN, train_pick=0 forces it OUT,
             # NULL leaves it to the gate (Training Data page).
             cur.execute("""SELECT embedding FROM detections
-                           WHERE identity_id = :1 AND confirmed = 1
+                           WHERE identity_id = :1 AND confirmed = 1 AND embedding IS NOT NULL
                              AND ( train_pick = 1
                                    OR ( train_pick IS NULL
                                         AND score >= :2
@@ -80,12 +80,13 @@ def rebuild_protos(cur, identity_id=None):
             rows = cur.fetchall()
             if len(rows) < PROTO_FLOOR:           # gate left too little: fall back to all confirmed (still
                 cur.execute("""SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1
+                               AND embedding IS NOT NULL
                                AND (train_pick IS NULL OR train_pick = 1)""", [iid])  # honouring manual excludes
                 rows = cur.fetchall()             # so a person with only poor crops still gets a (weaker) gallery
         else:
             # hidden 'not a person': keep its junk prototypes as-is — they EXIST to match recurring junk,
             # so the quality gate (which would discard them) must not apply here.
-            cur.execute("SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1", [iid])
+            cur.execute("SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1 AND embedding IS NOT NULL", [iid])
             rows = cur.fetchall()
         if not rows:
             continue
@@ -197,6 +198,7 @@ def rename(cur, ident_id, name):
         target = int(row[0])
         cur.execute("UPDATE detections SET identity_id = :1 WHERE identity_id = :2", [target, ident_id])
         cur.execute("UPDATE labels SET identity_id = :1 WHERE identity_id = :2", [target, ident_id])
+        cur.execute("DELETE FROM person_protos WHERE identity_id = :1", [ident_id])  # drop merged-away gallery
         cur.execute("DELETE FROM identities WHERE id = :1", [ident_id])
         return target
     cur.execute("UPDATE identities SET name = :1 WHERE id = :2", [name, ident_id])

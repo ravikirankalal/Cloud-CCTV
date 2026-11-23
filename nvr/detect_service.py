@@ -369,7 +369,7 @@ def _cluster(cur):
     O(n^3) worst case but numpy-vectorized per merge; the unknown pool is self-limiting (rows get tagged
     or dismissed), so n is hundreds in practice."""
     cur.execute("SELECT id, embedding FROM detections WHERE identity_id IS NULL "
-                "AND (confirmed = 0 OR confirmed IS NULL) ORDER BY id")
+                "AND (confirmed = 0 OR confirmed IS NULL) AND embedding IS NOT NULL ORDER BY id")
     rows = cur.fetchall()
     if not rows:
         return 0
