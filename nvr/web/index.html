@@ -253,7 +253,7 @@ const canHevcMse = !!MSE && MSE.isTypeSupported(HEVC(false));
 /* ===================== state ===================== */
 // mode: 'live' (WebSocket relay, ~0.4 s) | 'hlslive' (HLS live, ~20 s) | 'vod' (recordings)
 const st = { mode: null, hls: null, rt: null, frags: [], winEnd: 0, speed: 1, spans: [], day: dayKey(now()),
-             zoom: 1, center: now(), wall: null, soundOn: false, loading: 0 };
+             zoom: 1, center: now(), wall: null, soundOn: false, loading: 0, want: true };
 try { st.soundOn = localStorage.getItem('sound') === 'on'; } catch {}
 
 function message(html, spin) { $('msg').innerHTML = (spin ? '<div class="spin"></div>' : '') + html; $('msg').hidden = !html; }
@@ -392,16 +392,29 @@ function hlsLoad(url, onReady, opts = {}) {
     message("<b>This browser can't play the HD video</b>It's H.265: use Safari, or Chrome / Edge on a device with H.265 hardware decoding.");
   }
 }
+// Start playback reliably. A bare play() right after a source swap + currentTime seek is often
+// aborted — and the rejection is swallowed — leaving the video paused on the seeked frame. That
+// freezes BOTH the clock and the timeline cursor (both derive from currentTime), which is exactly
+// what happens when seeking to a recording from live. Mark intent and retry on the readiness events.
+function playSoon() {
+  st.want = true;
+  const go = () => { if (st.want) video.play().catch(() => {}); };
+  go();
+  for (const ev of ['loadeddata', 'canplay', 'seeked']) video.addEventListener(ev, go, { once: true });
+}
 function hlsLive() {
   stopAll(); st.mode = 'hlslive';
   message('Loading live…', true);
-  hlsLoad(`/api/live.m3u8?stream=${STREAM}`, () => { message(''); video.play().catch(() => {}); }, { liveSyncDurationCount: 1 });
+  hlsLoad(`/api/live.m3u8?stream=${STREAM}`, () => { message(''); playSoon(); }, { liveSyncDurationCount: 1 });
   ui();
 }
 // wall-clock time <-> media time, from the fragments' PROGRAM-DATE-TIMEs
 function wallAt(ct) {
   if (st.mode === 'live') return now() - Math.max(0, (video.buffered.length ? video.buffered.end(video.buffered.length - 1) : ct) - ct);
-  const f = st.frags.find(f => ct >= f.start - 0.05 && ct < f.start + f.duration + 0.05);
+  // the fragment containing ct, or (just outside one, e.g. between frags) the nearest one with a
+  // PDT, so the clock/cursor keep moving with currentTime instead of freezing on a lookup miss.
+  const f = st.frags.find(f => ct >= f.start - 0.05 && ct < f.start + f.duration + 0.05)
+    || st.frags.filter(f => f.programDateTime).sort((a, b) => Math.abs(a.start - ct) - Math.abs(b.start - ct))[0];
   if (f && f.programDateTime) return f.programDateTime / 1000 + (ct - f.start);
   if (!st.hls && video.getStartDate && !isNaN(video.getStartDate())) return video.getStartDate() / 1000 + ct;
   return null;
@@ -425,7 +438,7 @@ async function playAt(t) {
     if (req !== st.loading) return;
     video.currentTime = mediaAt(t);
     video.playbackRate = st.speed;
-    video.play().catch(() => {});
+    playSoon();
     message('');
   });
   st.wall = t; ui();
@@ -601,6 +614,10 @@ function ui() {
 }
 setInterval(() => {
   if (mode) return;   // don't fight the user while they're scrubbing or panning the timeline
+  // self-heal a playback that stalled paused (e.g. a play() aborted by the live->recording source
+  // swap): if we mean to be playing and the element is ready but paused, nudge it. st.want is false
+  // only after a manual pause, so this never fights the user.
+  if ((st.mode === 'vod' || st.mode === 'hlslive') && st.want && video.paused && video.readyState >= 2 && !video.seeking) video.play().catch(() => {});
   const w = wallAt(video.currentTime);
   if (w) {
     st.wall = w;
@@ -634,7 +651,7 @@ async function health() {
 setInterval(health, 30000);
 
 $('liveBtn').onclick = () => { st.day = dayKey(now()); st.center = now(); goLive(); loadSpans(); };
-$('playBtn').onclick = () => { video.paused ? video.play().catch(() => {}) : video.pause(); };
+$('playBtn').onclick = () => { if (video.paused) { st.want = true; video.play().catch(() => {}); } else { st.want = false; video.pause(); } };
 video.addEventListener('play', ui); video.addEventListener('pause', ui);
 video.addEventListener('play', soundSync); video.addEventListener('pause', soundSync);
 $('back10').onclick = () => st.wall && seekWall(st.wall - 10);
