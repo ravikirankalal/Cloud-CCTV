@@ -339,19 +339,31 @@ def set_cover(ident_id, det_id):
 
 def train_pick(det_ids, pick):
     """Manually set whether crops train: pick=1 force INTO the gallery, 0 force OUT, None back to the auto
-    gate. Only affects CONFIRMED crops of a known person (a pick on anything else is a no-op). Rebuilds the
-    affected galleries so the change takes effect immediately. `rematch` re-propagates to unconfirmed rows."""
+    gate. Applies to crops of a KNOWN person. pick=1 also CONFIRMS an auto-detected (confirmed=0) crop —
+    adding it to training is the user's manual assertion that it IS this person, which is exactly what the
+    'only manually-confirmed crops may train' rule requires. pick=0 / None only touch already-confirmed crops
+    (there's nothing to exclude on an unconfirmed one). Rebuilds the affected galleries; `rematch` then
+    re-propagates to the remaining unconfirmed rows."""
     val = None if pick is None else (1 if int(pick) == 1 else 0)
     def w(cur):
         idents = set()
         for did in det_ids:
-            cur.execute("""SELECT identity_id FROM detections WHERE id = :1 AND confirmed = 1
+            cur.execute("""SELECT identity_id, confirmed FROM detections WHERE id = :1
                            AND identity_id IN (SELECT id FROM identities WHERE kind = 'known')""", [int(did)])
             r = cur.fetchone()
             if not r:
                 continue
-            cur.execute("UPDATE detections SET train_pick = :1 WHERE id = :2", [val, int(did)])
-            idents.add(int(r[0]))
+            iid, confirmed = int(r[0]), int(r[1] or 0)
+            if val == 1:
+                # force into training; confirm an auto-detected crop so it may seed the gallery
+                cur.execute("UPDATE detections SET train_pick = 1, confirmed = 1 WHERE id = :1", [int(did)])
+                if confirmed == 0:                 # record the user's assertion only when it newly confirms
+                    cur.execute("INSERT INTO labels (detection_id, identity_id, action) VALUES (:1, :2, 'name')",
+                                [int(did), iid])
+                idents.add(iid)
+            elif confirmed == 1:
+                cur.execute("UPDATE detections SET train_pick = :1 WHERE id = :2", [val, int(did)])
+                idents.add(iid)
         for iid in idents:
             match.rebuild_protos(cur, iid)
         if idents:
