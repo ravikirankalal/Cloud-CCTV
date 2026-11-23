@@ -12,6 +12,8 @@
 #   GET  /detapi/people                 known people: [{id,name,count,sample}]
 #   GET  /detapi/unknowns?limit=N       recent un-identified detections: [{id,ts,seg_id,score}]
 #   GET  /detapi/person?id=N            one identity's crops: {name, detections:[{id,ts,score}]}
+#   GET  /detapi/training               known people + their training-set sizes: [{id,name,confirmed,trained,sample}]
+#   GET  /detapi/training_person?id=N   one person's confirmed training crops (all dates) + quality flags
 #   GET  /detapi/group?id=N             one unknown group's crops (N = a member): {grp, detections:[...]}
 #   GET  /detapi/crop/<id>.jpg          the person crop for one detection (decoded on demand, cached)
 #   GET  /detapi/stats                  detect VM: {host, detect:{cursor,lag_s,backlog}, services:[unit...]}
@@ -154,6 +156,67 @@ def person(ident_id, frm=None, to=None):
     name, rows = db(q)
     dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
             for d, t, s in rows if has_crop(int(d))]
+    return {"name": name, "detections": dets}
+
+
+def _trained(score, focus, boxfrac):
+    """True if this confirmed crop actually seeds the gallery — passes the training quality gate
+    (match.TRAIN_*). NULL focus/boxfrac (not yet backfilled) passes, mirroring rebuild_protos."""
+    if score is None or float(score) < match.TRAIN_MIN_SCORE:
+        return False
+    if focus is not None and float(focus) < match.TRAIN_MIN_FOCUS:
+        return False
+    if boxfrac is not None and float(boxfrac) > match.TRAIN_MAX_BOXFRAC:
+        return False
+    return True
+
+
+def training():
+    """Known people with their TRAINING set (manually-confirmed crops, any date). Each carries how many
+    confirmed crops exist and how many actually train (pass the quality gate), plus a sample crop."""
+    def q(cur):
+        cur.execute("""SELECT i.id, i.name,
+                              SUM(CASE WHEN d.confirmed = 1 THEN 1 ELSE 0 END)
+                       FROM identities i LEFT JOIN detections d ON d.identity_id = i.id
+                       WHERE i.kind = 'known'
+                       GROUP BY i.id, i.name ORDER BY LOWER(i.name)""")
+        return cur.fetchall()
+
+    def detail(cur, iid):
+        cur.execute("""SELECT id, score, focus, boxfrac FROM detections
+                       WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC""", [iid])
+        rows = cur.fetchall()
+        used = sum(1 for _, s, f, b in rows if _trained(s, f, b))
+        sample = next((int(r[0]) for r in rows if has_crop(int(r[0]))), None)
+        return used, sample
+
+    out = []
+    for r in db(q):
+        iid = int(r[0]); confirmed = int(r[2] or 0)
+        used, sample = db(lambda cur: detail(cur, iid))
+        out.append({"id": iid, "name": r[1], "confirmed": confirmed, "trained": used, "sample": sample})
+    return out
+
+
+def training_person(ident_id):
+    """One person's full TRAINING set (every manually-confirmed crop, all dates) with the quality signals
+    and whether each actually trains, so the user can prune blurry / zoomed / wrong crops from the gallery."""
+    def q(cur):
+        cur.execute("SELECT name FROM identities WHERE id = :1", [ident_id])
+        nm = cur.fetchone()
+        cur.execute("""SELECT id, ts, score, focus, boxfrac FROM detections
+                       WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC
+                       FETCH FIRST 1500 ROWS ONLY""", [ident_id])
+        return (nm[0] if nm else None), cur.fetchall()
+    name, rows = db(q)
+    dets = []
+    for d, t, s, f, b in rows:
+        if not has_crop(int(d)):
+            continue
+        dets.append({"id": int(d), "ts": float(t), "score": round(float(s), 2) if s is not None else None,
+                     "focus": round(float(f), 3) if f is not None else None,
+                     "boxfrac": round(float(b), 2) if b is not None else None,
+                     "used": _trained(s, f, b)})
     return {"name": name, "detections": dets}
 
 
@@ -357,6 +420,10 @@ class H(BaseHTTPRequestHandler):
             if u.path == "/detapi/person":
                 frm, to = _range(q)
                 return self.send(200, json.dumps(person(int(q["id"][0]), frm, to)))
+            if u.path == "/detapi/training":
+                return self.send(200, json.dumps(training()))
+            if u.path == "/detapi/training_person":
+                return self.send(200, json.dumps(training_person(int(q["id"][0]))))
             if u.path == "/detapi/group":
                 frm, to = _range(q)
                 return self.send(200, json.dumps(group(int(q["id"][0]), frm, to)))

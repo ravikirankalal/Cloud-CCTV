@@ -13,6 +13,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import adb
 
 DEFAULT_THR = float(os.environ.get("DET_MATCH", "0.28"))   # cosine distance < this => same person
+TRAIN_MIN_SCORE = float(os.environ.get("DET_TRAIN_SCORE", "0.5"))   # gallery crop must be >= this confident
+TRAIN_MIN_FOCUS = float(os.environ.get("DET_TRAIN_FOCUS", "0.08"))  # ...this sharp (detect.focus_score)
+TRAIN_MAX_BOXFRAC = float(os.environ.get("DET_TRAIN_BOXFRAC", "0.75"))  # ...and not an extreme close-up
+#   (box fills >75% of a frame dimension: a partial/distorted person, or a big-box false positive). Good
+#   full-body standing crops sit ~0.5-0.7, so this trims only the extreme tail.
+PROTO_FLOOR = int(os.environ.get("DET_PROTO_FLOOR", "4"))   # keep at least this many; below it, relax the gate
 PROTO_K = int(os.environ.get("DET_PROTO_K", "16"))         # prototype centroids per known person (gallery size)
 APPROX_K = int(os.environ.get("DET_APPROX_K", "1000"))     # per-proto candidate fan-out for the vector index
 SUPPRESS_THR = float(os.environ.get("DET_SUPPRESS", "0.22"))  # TIGHTER cosine gate for auto-hiding a match to
@@ -51,14 +57,31 @@ def rebuild_protos(cur, identity_id=None):
     'not a person' identity is included so its prototypes drive auto-suppression (see nearest_proto)."""
     import numpy as np, array
     if identity_id is not None:
-        idents = [int(identity_id)]
+        cur.execute("SELECT id, kind FROM identities WHERE id = :1", [int(identity_id)])
     else:
-        cur.execute("SELECT id FROM identities WHERE kind IN ('known', 'hidden')")
-        idents = [int(r[0]) for r in cur.fetchall()]
-    for iid in idents:
-        cur.execute("SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1", [iid])
-        rows = cur.fetchall()
+        cur.execute("SELECT id, kind FROM identities WHERE kind IN ('known', 'hidden')")
+    idents = [(int(r[0]), r[1]) for r in cur.fetchall()]
+    for iid, kind in idents:
         cur.execute("DELETE FROM person_protos WHERE identity_id = :1", [iid])
+        if kind == "known":
+            # TRAINING GATE: a known person's gallery is built ONLY from manually-confirmed crops that are
+            # also confident, sharp and not an extreme close-up — blurry / low-score / zoomed crops drag the
+            # centroid and mis-match future detections. NULL focus/boxfrac (not yet backfilled) passes.
+            cur.execute("""SELECT embedding FROM detections
+                           WHERE identity_id = :1 AND confirmed = 1
+                             AND score >= :2
+                             AND (focus IS NULL OR focus >= :3)
+                             AND (boxfrac IS NULL OR boxfrac <= :4)""",
+                        [iid, TRAIN_MIN_SCORE, TRAIN_MIN_FOCUS, TRAIN_MAX_BOXFRAC])
+            rows = cur.fetchall()
+            if len(rows) < PROTO_FLOOR:           # gate left too little: fall back to all confirmed so a
+                cur.execute("SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1", [iid])
+                rows = cur.fetchall()             # person with only poor crops still gets a (weaker) gallery
+        else:
+            # hidden 'not a person': keep its junk prototypes as-is — they EXIST to match recurring junk,
+            # so the quality gate (which would discard them) must not apply here.
+            cur.execute("SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1", [iid])
+            rows = cur.fetchall()
         if not rows:
             continue
         E = np.asarray([np.asarray(r[0], np.float32) for r in rows])

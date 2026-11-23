@@ -241,6 +241,24 @@ def crop_to_jpeg(frame_rgb, box, pad=0.12, max_side=320, quality=82):
     return buf.getvalue()
 
 
+def focus_score(rgb, box=None):
+    """A blur/sharpness score for a crop (or a box within a frame): the variance of the Laplacian
+    normalized by the crop's own variance, so it reads high-frequency DETAIL relative to overall
+    contrast and stays roughly size/brightness-invariant. Sharp subjects score high; motion-blurred,
+    tiny or out-of-focus ones score low. Used to keep blurred crops out of the re-ID training gallery.
+    Pure numpy. Returns 0.0 for a too-small region."""
+    H, W = rgb.shape[:2]
+    if box is not None:
+        x1, y1, x2, y2 = (max(0, int(box[0])), max(0, int(box[1])), min(W, int(box[2])), min(H, int(box[3])))
+        rgb = rgb[y1:y2, x1:x2]
+    if rgb.shape[0] < 10 or rgb.shape[1] < 10:
+        return 0.0
+    g = rgb.astype(np.float32).mean(axis=2)                       # grayscale
+    lap = (-4.0 * g[1:-1, 1:-1] + g[:-2, 1:-1] + g[2:, 1:-1] + g[1:-1, :-2] + g[1:-1, 2:])
+    v = g.var()
+    return float(lap.var() / (v + 1e-3))
+
+
 # ---- CLI (testing) ----
 def _seg_by_id(segid):
     import sqlite3

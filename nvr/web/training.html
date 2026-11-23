@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0c1312">
+<title>Training Data · Guttedar Nilaya</title>
+<link rel="icon" href="/assets/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/assets/icon.svg">
+<meta name="description" content="Curate the crops that train each person's re-ID.">
+<meta name="color-scheme" content="dark">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,700&family=Hanken+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#0c1312; --bg2:#090f0e; --panel:#121b19; --panel2:#182320; --elev:#1f2c27;
+  --line:rgba(236,224,205,.08); --line2:rgba(236,224,205,.17);
+  --text:#edf1ea; --muted:#99a69c; --faint:#5f6c63;
+  --amber:#f0a83a; --amber-ink:#241704; --amber-glow:rgba(240,168,58,.16);
+  --rust:#d2705a; --good:#7bbf8f;
+  --radius:16px; --radius-sm:11px; --shadow:0 20px 50px -30px rgba(0,0,0,.92);
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--text);
+  font:15px/1.5 "Hanken Grotesk",system-ui,-apple-system,Segoe UI,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;-webkit-tap-highlight-color:transparent}
+body{min-height:100dvh}
+.mono{font-variant-numeric:tabular-nums}
+button{font:inherit;font-weight:500;color:var(--text);background:var(--panel2);border:1px solid var(--line);
+  border-radius:var(--radius-sm);padding:0 15px;min-height:44px;cursor:pointer;touch-action:manipulation;
+  display:inline-flex;align-items:center;justify-content:center;gap:7px;transition:background .16s,border-color .16s,transform .05s}
+button:hover{background:var(--elev);border-color:var(--line2)}
+button:active{transform:scale(.975)}
+button:disabled{opacity:.45;cursor:default}
+[hidden]{display:none!important}
+a{color:var(--amber);text-decoration:none}
+.app{max-width:1060px;margin:0 auto;padding:16px 16px calc(28px + env(safe-area-inset-bottom))}
+header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2px 0}
+.back{width:40px;height:44px;padding:0;font-size:21px;color:var(--muted);background:transparent;border-color:transparent}
+.back:hover{background:var(--panel2);border-color:var(--line)}
+.masthead{flex:1;min-width:0;line-height:1.08}
+.house{font-family:"Bricolage Grotesque",serif;font-weight:700;font-size:23px;letter-spacing:-.02em;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kicker{font-size:11.5px;color:var(--muted);margin-top:1px}
+.note{font-size:13px;color:var(--muted);margin:14px 2px 20px;line-height:1.45}
+.note b{color:var(--text);font-weight:600}
+/* people list */
+.people{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:12px}
+.pcard{position:relative;aspect-ratio:1/1;border:1px solid var(--line);border-radius:14px;overflow:hidden;
+  background:var(--panel2);cursor:pointer;transition:border-color .16s,transform .1s}
+.pcard:hover{border-color:var(--line2);transform:translateY(-2px);box-shadow:var(--shadow)}
+.pcard .ph{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;object-position:50% 22%}
+.pcard .meta{position:absolute;inset:auto 0 0 0;padding:24px 11px 10px;
+  background:linear-gradient(to top,rgba(6,10,9,.93) 24%,transparent)}
+.pcard .nm{font-weight:600;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pcard .ct{font-size:11.5px;color:rgba(237,241,234,.72);margin-top:1px}
+.pcard .ct b{color:var(--good)}
+/* detail */
+.sub{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin:10px 2px 16px}
+.pill{font-size:12.5px;color:var(--muted);background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:5px 11px}
+.pill b{color:var(--text)}
+.bar{display:flex;gap:9px;align-items:center;margin:0 2px 16px;flex-wrap:wrap}
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}
+.seg button{min-height:38px;border:0;border-radius:0;background:transparent;color:var(--muted);font-size:13px;padding:0 14px}
+.seg button.on{background:var(--panel2);color:var(--text)}
+.spacer{flex:1}
+.danger{color:var(--rust);border-color:rgba(210,112,90,.4)}
+.danger:hover{background:rgba(210,112,90,.12);border-color:var(--rust)}
+.crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:11px}
+.thumb{position:relative;aspect-ratio:3/4;border-radius:10px;overflow:hidden;border:1px solid var(--line);cursor:pointer;background:var(--bg2)}
+.thumb img{width:100%;height:100%;object-fit:cover;object-position:50% 20%;display:block}
+.thumb.ex img{opacity:.42;filter:grayscale(.3)}
+.thumb .sc{position:absolute;left:4px;bottom:4px;font-size:10.5px;font-variant-numeric:tabular-nums;
+  background:rgba(9,15,14,.8);padding:1px 6px;border-radius:7px;color:var(--text)}
+.thumb .bad{position:absolute;left:4px;top:4px;font-size:10px;font-weight:600;background:var(--rust);color:#fff;padding:1px 6px;border-radius:7px}
+.thumb.sel{outline:2.5px solid var(--amber);outline-offset:-2.5px}
+.thumb .chk{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;background:rgba(9,15,14,.65);
+  border:1.5px solid rgba(255,255,255,.5);display:none;align-items:center;justify-content:center;color:#fff;font-size:13px}
+body.sel .thumb .chk{display:inline-flex}
+.thumb.sel .chk{background:var(--amber);border-color:var(--amber);color:var(--amber-ink)}
+.empty{color:var(--faint);text-align:center;padding:40px 0;font-size:14px}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);
+  background:var(--elev);border:1px solid var(--line2);border-radius:12px;padding:11px 16px;font-size:13.5px;
+  box-shadow:var(--shadow);opacity:0;transition:opacity .2s;pointer-events:none;z-index:9}
+.toast.on{opacity:1}
+.sk{animation:p 1.3s ease-in-out infinite;background:var(--panel2);border-radius:12px}
+@keyframes p{0%,100%{opacity:.5}50%{opacity:.85}}
+@keyframes s{to{transform:rotate(360deg)}}
+.busy{position:relative;pointer-events:none;color:transparent!important}
+.busy::after{content:"";position:absolute;inset:0;margin:auto;width:15px;height:15px;
+  border:2px solid rgba(255,255,255,.4);border-top-color:#fff;border-radius:50%;animation:s .8s linear infinite}
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <button class="back" id="back" title="Back">‹</button>
+    <div class="masthead">
+      <div class="house" id="title">Training Data</div>
+      <div class="kicker" id="kick">The crops that teach each person — across all dates</div>
+    </div>
+  </header>
+
+  <!-- LIST -->
+  <section id="listView">
+    <div class="note">These are the <b>manually-tagged</b> crops that train re-ID. Blurry, low-confidence and
+      extreme close-up crops are <b>auto-excluded</b> (dimmed). Open a person to prune wrong or poor crops —
+      removing one drops it back to the Unknown pool and rebuilds that person's gallery.</div>
+    <div class="people" id="people"></div>
+  </section>
+
+  <!-- DETAIL -->
+  <section id="detailView" hidden>
+    <div class="sub" id="dstats"></div>
+    <div class="bar">
+      <div class="seg" id="filter">
+        <button data-f="all" class="on">All</button>
+        <button data-f="train">Training</button>
+        <button data-f="excluded">Excluded</button>
+      </div>
+      <div class="spacer"></div>
+      <button id="selBtn">Select</button>
+      <button id="rmBtn" class="danger" hidden>Remove (0)</button>
+    </div>
+    <div class="crops" id="crops"></div>
+    <div class="empty" id="dempty" hidden>No crops here.</div>
+  </section>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $=id=>document.getElementById(id);
+const cropUrl=id=>`/detapi/crop/${id}.jpg`;
+const api=p=>fetch(p).then(r=>r.ok?r.json():Promise.reject(r.status));
+const post=(p,b)=>fetch(p,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(r=>r.ok?r.json():Promise.reject(r.status));
+let toastT;
+function toast(m){const t=$('toast');t.textContent=m;t.classList.add('on');clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove('on'),2200);}
+function reason(d){if(d.used)return null;if(d.score!=null&&d.score<0.5)return 'low';if(d.focus!=null&&d.focus<0.08)return 'blur';if(d.boxfrac!=null&&d.boxfrac>0.75)return 'zoom';return 'out';}
+
+let st={view:'list',person:null,dets:[],filter:'all',selecting:false,sel:new Set()};
+
+async function loadList(){
+  $('people').innerHTML='<div class="sk" style="aspect-ratio:1/1"></div>'.repeat(6);
+  let ppl;try{ppl=await api('/detapi/training');}catch(e){$('people').innerHTML='<div class="empty">Could not load.</div>';return;}
+  if(!ppl.length){$('people').innerHTML='<div class="empty">No tagged people yet. Tag someone on the People page first.</div>';return;}
+  $('people').innerHTML=ppl.map(p=>`
+    <div class="pcard" data-id="${p.id}" data-name="${encodeURIComponent(p.name||'')}">
+      ${p.sample?`<img class="ph" src="${cropUrl(p.sample)}" loading="lazy" onerror="this.style.visibility='hidden'">`:''}
+      <div class="meta"><div class="nm">${p.name||'—'}</div>
+        <div class="ct"><b>${p.trained}</b> training · ${p.confirmed} tagged</div></div>
+    </div>`).join('');
+  $('people').querySelectorAll('.pcard').forEach(c=>c.onclick=()=>openPerson(+c.dataset.id,decodeURIComponent(c.dataset.name)));
+}
+
+async function openPerson(id,name){
+  st.view='detail';st.person={id,name};st.filter='all';exitSelect();
+  $('listView').hidden=true;$('detailView').hidden=false;
+  $('title').textContent=name||'Person';$('kick').textContent='Training crops · all dates';
+  $('filter').querySelectorAll('button').forEach(b=>b.classList.toggle('on',b.dataset.f==='all'));
+  $('crops').innerHTML='<div class="sk" style="aspect-ratio:3/4"></div>'.repeat(8);$('dempty').hidden=true;
+  history.pushState({person:id},'');
+  let d;try{d=await api('/detapi/training_person?id='+id);}catch(e){$('crops').innerHTML='<div class="empty">Could not load.</div>';return;}
+  st.dets=d.detections||[];
+  renderStats();renderCrops();
+}
+function renderStats(){
+  const n=st.dets.length,used=st.dets.filter(x=>x.used).length;
+  $('dstats').innerHTML=`<span class="pill"><b>${used}</b> training</span>
+    <span class="pill"><b>${n-used}</b> excluded</span>
+    <span class="pill">${n} tagged total</span>`;
+}
+function renderCrops(){
+  const f=st.filter;
+  const list=st.dets.filter(d=>f==='all'||(f==='train'&&d.used)||(f==='excluded'&&!d.used));
+  $('dempty').hidden=list.length>0;
+  $('crops').innerHTML=list.map(d=>{
+    const r=reason(d);
+    return `<div class="thumb ${d.used?'':'ex'} ${st.sel.has(d.id)?'sel':''}" data-id="${d.id}">
+      <img src="${cropUrl(d.id)}" loading="lazy" onerror="this.closest('.thumb').remove()">
+      <span class="sc">${d.score!=null?d.score.toFixed(2):'–'}</span>
+      ${r?`<span class="bad">${r}</span>`:''}
+      <span class="chk">✓</span></div>`;}).join('');
+  $('crops').querySelectorAll('.thumb').forEach(t=>t.onclick=()=>tapThumb(+t.dataset.id));
+}
+function tapThumb(id){
+  if(!st.selecting){st.selecting=true;document.body.classList.add('sel');$('selBtn').textContent='Cancel';}
+  if(st.sel.has(id))st.sel.delete(id);else st.sel.add(id);
+  renderCrops();updateRm();
+}
+function updateRm(){const n=st.sel.size;const b=$('rmBtn');b.hidden=!st.selecting;b.textContent=`Remove (${n})`;b.disabled=!n;}
+function exitSelect(){st.selecting=false;st.sel.clear();document.body.classList.remove('sel');$('selBtn').textContent='Select';$('rmBtn').hidden=true;}
+$('selBtn').onclick=()=>{if(st.selecting)exitSelect();else{st.selecting=true;document.body.classList.add('sel');$('selBtn').textContent='Cancel';updateRm();}};
+$('rmBtn').onclick=async()=>{
+  const ids=[...st.sel];if(!ids.length)return;
+  $('rmBtn').classList.add('busy');
+  try{await post('/detapi/unassign',{ids});
+    st.dets=st.dets.filter(d=>!st.sel.has(d.id));
+    toast(ids.length+' removed from training');
+    exitSelect();renderStats();renderCrops();
+  }catch(e){toast('Remove failed ('+e+')');}
+  $('rmBtn').classList.remove('busy');updateRm();
+};
+$('filter').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  st.filter=b.dataset.f;$('filter').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderCrops();});
+function toList(){st.view='list';st.person=null;exitSelect();$('detailView').hidden=true;$('listView').hidden=false;
+  $('title').textContent='Training Data';$('kick').textContent='The crops that teach each person — across all dates';loadList();}
+$('back').onclick=()=>{if(st.view==='detail')history.back();else location.href='/people';};
+window.onpopstate=()=>{if(st.view==='detail')toList();};
+loadList();
+</script>
+</body>
+</html>
