@@ -185,7 +185,9 @@ def unassign(cur, detection_id):
     confirmed=1, _cluster() PINS it (skips it) on every later pass, so the detachment sticks instead of being
     re-merged by embedding — the removal is remembered."""
     cur.execute("INSERT INTO labels (detection_id, action) VALUES (:1, 'remove')", [detection_id])
-    cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 1, cluster_id = id WHERE id = :1",
+    # train_pick is a per-person training override; the crop is leaving the person, so clear it too —
+    # otherwise a stale include/exclude flag lingers and would resurface if it's ever re-tagged here.
+    cur.execute("UPDATE detections SET identity_id = NULL, confirmed = 1, cluster_id = id, train_pick = NULL WHERE id = :1",
                 [detection_id])
 
 
