@@ -172,17 +172,14 @@ def person(ident_id, frm=None, to=None):
                            ORDER BY confirmed DESC, ts DESC FETCH FIRST 500 ROWS ONLY""", [ident_id])
         return (nm[0] if nm else None), cur.fetchall()
     name, rows = db(q)
-    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
+    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2) if s is not None else None}
             for d, t, s in rows if has_crop(int(d))]
     return {"name": name, "detections": dets}
 
 
-def _trained(score, focus, boxfrac, pick=None):
-    """True if this confirmed crop actually seeds the gallery. A manual pick wins: pick=1 forces IN, pick=0
-    forces OUT; otherwise it passes the auto quality gate (match.TRAIN_*). Mirrors rebuild_protos; NULL
-    focus/boxfrac (not yet backfilled) passes the gate."""
-    if pick is not None:
-        return int(pick) == 1
+def _gate_pass(score, focus, boxfrac):
+    """The auto quality gate alone (no manual pick, no fallback): confident, sharp, not an extreme close-up.
+    NULL focus/boxfrac (not yet backfilled) pass; NULL score fails. Mirrors the gate in match.rebuild_protos."""
     if score is None or float(score) < match.TRAIN_MIN_SCORE:
         return False
     if focus is not None and float(focus) < match.TRAIN_MIN_FOCUS:
@@ -190,6 +187,23 @@ def _trained(score, focus, boxfrac, pick=None):
     if boxfrac is not None and float(boxfrac) > match.TRAIN_MAX_BOXFRAC:
         return False
     return True
+
+
+def _trained_ids(rows):
+    """Given an identity's confirmed crops as (id, score, focus, boxfrac, pick), return the set of ids that
+    ACTUALLY seed the gallery — mirroring match.rebuild_protos INCLUDING the PROTO_FLOOR fallback: when fewer
+    than PROTO_FLOOR crops pass the gate, the gallery falls back to all confirmed crops except force-excluded
+    (train_pick=0). Without this the training page under-reports 'trained' for people whose crops are all
+    sub-threshold (the gate starves and the fallback trains on all of them)."""
+    gated, kept = set(), set()
+    for did, s, f, b, p in rows:
+        did = int(did); pk = None if p is None else int(p)
+        if pk == 0:
+            continue                      # force-excluded: never trains, in gate or fallback
+        kept.add(did)                     # eligible for the fallback (train_pick=1 or NULL)
+        if pk == 1 or _gate_pass(s, f, b):
+            gated.add(did)
+    return kept if len(gated) < match.PROTO_FLOOR else gated
 
 
 def training():
@@ -207,7 +221,7 @@ def training():
         cur.execute("""SELECT id, score, focus, boxfrac, train_pick FROM detections
                        WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC""", [iid])
         rows = cur.fetchall()
-        used = sum(1 for _, s, f, b, p in rows if _trained(s, f, b, p))
+        used = len(_trained_ids(rows))
         sample = _cover(cur, iid) or next((int(r[0]) for r in rows if has_crop(int(r[0]))), None)
         return used, sample
 
@@ -231,6 +245,7 @@ def training_person(ident_id):
                        FETCH FIRST 1500 ROWS ONLY""", [ident_id])
         return (nm[0] if nm else None), cover, cur.fetchall()
     name, cover, rows = db(q)
+    tids = _trained_ids((d, s, f, b, p) for d, t, s, f, b, p in rows)  # mirrors the gallery incl. fallback
     dets = []
     for d, t, s, f, b, p in rows:
         if not has_crop(int(d)):
@@ -238,7 +253,7 @@ def training_person(ident_id):
         dets.append({"id": int(d), "ts": float(t), "score": round(float(s), 2) if s is not None else None,
                      "focus": round(float(f), 3) if f is not None else None,
                      "boxfrac": round(float(b), 2) if b is not None else None,
-                     "pick": (int(p) if p is not None else None), "used": _trained(s, f, b, p)})
+                     "pick": (int(p) if p is not None else None), "used": int(d) in tids})
     return {"name": name, "cover": cover, "detections": dets}
 
 
@@ -261,7 +276,7 @@ def group(rep_id, frm=None, to=None):
                            ORDER BY ts DESC FETCH FIRST 500 ROWS ONLY""", [grp])
         return grp, cur.fetchall()
     grp, rows = db(q)
-    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2)}
+    dets = [{"id": int(d), "ts": float(t), "score": round(float(s), 2) if s is not None else None}
             for d, t, s in rows if has_crop(int(d))]
     return {"grp": grp, "detections": dets}
 
@@ -344,16 +359,20 @@ def unknowns(limit, frm=None, to=None):
     that id names the whole group (detect_service assigned the cluster_id). With a [frm,to) epoch range,
     only crops seen in it (so a group's shown count is its sightings that day)."""
     def q(cur):
+        # Cap the raw scan so a large legacy untagged pool can't blow up memory / stat every crop file.
+        # Rows are newest-first, so the cap keeps the most recent sightings (which is what the grid shows).
         if frm is not None and to is not None:
             cur.execute("""SELECT id, ts, score, NVL(cluster_id, id) grp FROM detections
-                           WHERE identity_id IS NULL AND ts >= :1 AND ts < :2 ORDER BY ts DESC""", [frm, to])
+                           WHERE identity_id IS NULL AND ts >= :1 AND ts < :2
+                           ORDER BY ts DESC FETCH FIRST 20000 ROWS ONLY""", [frm, to])
         else:
             cur.execute("""SELECT id, ts, score, NVL(cluster_id, id) grp FROM detections
-                           WHERE identity_id IS NULL ORDER BY ts DESC""")
+                           WHERE identity_id IS NULL ORDER BY ts DESC FETCH FIRST 20000 ROWS ONLY""")
         return cur.fetchall()
     groups = {}
     for did, ts, score, grp in db(q):
-        did, grp, ts, score = int(did), int(grp), float(ts), round(float(score), 2)
+        did, grp, ts = int(did), int(grp), float(ts)
+        score = round(float(score), 2) if score is not None else 0.0
         if not has_crop(did):
             continue
         g = groups.get(grp)
@@ -474,7 +493,7 @@ class H(BaseHTTPRequestHandler):
                 frm, to = _range(q)
                 return self.send(200, json.dumps(people(frm, to)))
             if u.path == "/detapi/unknowns":
-                lim = min(int(q.get("limit", [UNKNOWN_LIMIT])[0]), UNKNOWN_LIMIT)
+                lim = max(1, min(int(q.get("limit", [UNKNOWN_LIMIT])[0]), UNKNOWN_LIMIT))
                 frm, to = _range(q)
                 return self.send(200, json.dumps(unknowns(lim, frm, to)))
             if u.path == "/detapi/person":
@@ -511,7 +530,7 @@ class H(BaseHTTPRequestHandler):
                     return self.send(200, f.read(), "image/jpeg",
                                      {"Cache-Control": "private, max-age=86400"})
             return self.err(404, "not found")
-        except (KeyError, ValueError) as e:
+        except (KeyError, ValueError, TypeError) as e:
             return self.err(400, str(e))
         except Exception as e:
             return self.err(500, str(e))
@@ -520,6 +539,8 @@ class H(BaseHTTPRequestHandler):
         u = urlparse(self.path)
         try:
             b = self.body_json()
+            if not isinstance(b, dict):            # a JSON array / string / number / null is not a request body
+                return self.err(400, "body must be a JSON object")
             if u.path == "/detapi/tag":
                 name = str(b.get("name", "")).strip()
                 ids = _ids(b)
@@ -552,7 +573,7 @@ class H(BaseHTTPRequestHandler):
                 det = b.get("det")
                 return self.send(200, json.dumps(set_cover(int(b["id"]), None if det is None else int(det))))
             return self.err(404, "not found")
-        except (KeyError, ValueError) as e:
+        except (KeyError, ValueError, TypeError) as e:
             return self.err(400, str(e))
         except Exception as e:
             return self.err(500, str(e))
