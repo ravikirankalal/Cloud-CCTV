@@ -67,16 +67,21 @@ def rebuild_protos(cur, identity_id=None):
             # TRAINING GATE: a known person's gallery is built ONLY from manually-confirmed crops that are
             # also confident, sharp and not an extreme close-up — blurry / low-score / zoomed crops drag the
             # centroid and mis-match future detections. NULL focus/boxfrac (not yet backfilled) passes.
+            # A MANUAL PICK overrides the gate: train_pick=1 forces a crop IN, train_pick=0 forces it OUT,
+            # NULL leaves it to the gate (Training Data page).
             cur.execute("""SELECT embedding FROM detections
                            WHERE identity_id = :1 AND confirmed = 1
-                             AND score >= :2
-                             AND (focus IS NULL OR focus >= :3)
-                             AND (boxfrac IS NULL OR boxfrac <= :4)""",
+                             AND ( train_pick = 1
+                                   OR ( train_pick IS NULL
+                                        AND score >= :2
+                                        AND (focus IS NULL OR focus >= :3)
+                                        AND (boxfrac IS NULL OR boxfrac <= :4) ) )""",
                         [iid, TRAIN_MIN_SCORE, TRAIN_MIN_FOCUS, TRAIN_MAX_BOXFRAC])
             rows = cur.fetchall()
-            if len(rows) < PROTO_FLOOR:           # gate left too little: fall back to all confirmed so a
-                cur.execute("SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1", [iid])
-                rows = cur.fetchall()             # person with only poor crops still gets a (weaker) gallery
+            if len(rows) < PROTO_FLOOR:           # gate left too little: fall back to all confirmed (still
+                cur.execute("""SELECT embedding FROM detections WHERE identity_id = :1 AND confirmed = 1
+                               AND (train_pick IS NULL OR train_pick = 1)""", [iid])  # honouring manual excludes
+                rows = cur.fetchall()             # so a person with only poor crops still gets a (weaker) gallery
         else:
             # hidden 'not a person': keep its junk prototypes as-is — they EXIST to match recurring junk,
             # so the quality gate (which would discard them) must not apply here.

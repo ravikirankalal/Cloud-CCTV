@@ -21,6 +21,7 @@
 #   POST /detapi/tag      {id|ids,name} name one/many groups -> known identity, then re-match history
 #   POST /detapi/reject   {id|ids}      mark one/many groups 'not a person' (hidden)
 #   POST /detapi/unassign {id|ids}      remove detection(s) from their identity, back to the unknown pool
+#   POST /detapi/train_pick {id|ids,pick} force crops into(1)/out of(0)/auto(null) the training gallery
 #   POST /detapi/rename   {id,name}     rename an identity (merges into an existing same-name person)
 import json
 import os
@@ -159,9 +160,12 @@ def person(ident_id, frm=None, to=None):
     return {"name": name, "detections": dets}
 
 
-def _trained(score, focus, boxfrac):
-    """True if this confirmed crop actually seeds the gallery — passes the training quality gate
-    (match.TRAIN_*). NULL focus/boxfrac (not yet backfilled) passes, mirroring rebuild_protos."""
+def _trained(score, focus, boxfrac, pick=None):
+    """True if this confirmed crop actually seeds the gallery. A manual pick wins: pick=1 forces IN, pick=0
+    forces OUT; otherwise it passes the auto quality gate (match.TRAIN_*). Mirrors rebuild_protos; NULL
+    focus/boxfrac (not yet backfilled) passes the gate."""
+    if pick is not None:
+        return int(pick) == 1
     if score is None or float(score) < match.TRAIN_MIN_SCORE:
         return False
     if focus is not None and float(focus) < match.TRAIN_MIN_FOCUS:
@@ -183,10 +187,10 @@ def training():
         return cur.fetchall()
 
     def detail(cur, iid):
-        cur.execute("""SELECT id, score, focus, boxfrac FROM detections
+        cur.execute("""SELECT id, score, focus, boxfrac, train_pick FROM detections
                        WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC""", [iid])
         rows = cur.fetchall()
-        used = sum(1 for _, s, f, b in rows if _trained(s, f, b))
+        used = sum(1 for _, s, f, b, p in rows if _trained(s, f, b, p))
         sample = next((int(r[0]) for r in rows if has_crop(int(r[0]))), None)
         return used, sample
 
@@ -204,19 +208,19 @@ def training_person(ident_id):
     def q(cur):
         cur.execute("SELECT name FROM identities WHERE id = :1", [ident_id])
         nm = cur.fetchone()
-        cur.execute("""SELECT id, ts, score, focus, boxfrac FROM detections
+        cur.execute("""SELECT id, ts, score, focus, boxfrac, train_pick FROM detections
                        WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC
                        FETCH FIRST 1500 ROWS ONLY""", [ident_id])
         return (nm[0] if nm else None), cur.fetchall()
     name, rows = db(q)
     dets = []
-    for d, t, s, f, b in rows:
+    for d, t, s, f, b, p in rows:
         if not has_crop(int(d)):
             continue
         dets.append({"id": int(d), "ts": float(t), "score": round(float(s), 2) if s is not None else None,
                      "focus": round(float(f), 3) if f is not None else None,
                      "boxfrac": round(float(b), 2) if b is not None else None,
-                     "used": _trained(s, f, b)})
+                     "pick": (int(p) if p is not None else None), "used": _trained(s, f, b, p)})
     return {"name": name, "detections": dets}
 
 
@@ -275,6 +279,29 @@ def rename(ident_id, name):
         match.rebuild_protos(cur, surviving)
         changed = match.rematch(cur)
         return {"ok": True, "identity": surviving, "rematched": changed}
+    return db(w, write=True)
+
+
+def train_pick(det_ids, pick):
+    """Manually set whether crops train: pick=1 force INTO the gallery, 0 force OUT, None back to the auto
+    gate. Only affects CONFIRMED crops of a known person (a pick on anything else is a no-op). Rebuilds the
+    affected galleries so the change takes effect immediately. `rematch` re-propagates to unconfirmed rows."""
+    val = None if pick is None else (1 if int(pick) == 1 else 0)
+    def w(cur):
+        idents = set()
+        for did in det_ids:
+            cur.execute("""SELECT identity_id FROM detections WHERE id = :1 AND confirmed = 1
+                           AND identity_id IN (SELECT id FROM identities WHERE kind = 'known')""", [int(did)])
+            r = cur.fetchone()
+            if not r:
+                continue
+            cur.execute("UPDATE detections SET train_pick = :1 WHERE id = :2", [val, int(did)])
+            idents.add(int(r[0]))
+        for iid in idents:
+            match.rebuild_protos(cur, iid)
+        if idents:
+            match.rematch(cur)
+        return {"ok": True, "count": len(det_ids), "people": len(idents)}
     return db(w, write=True)
 
 
@@ -481,6 +508,11 @@ class H(BaseHTTPRequestHandler):
                 if not name or "id" not in b:
                     return self.err(400, "need id and name")
                 return self.send(200, json.dumps(rename(int(b["id"]), name)))
+            if u.path == "/detapi/train_pick":
+                ids = _ids(b)
+                if not ids:
+                    return self.err(400, "need id(s)")
+                return self.send(200, json.dumps(train_pick(ids, b.get("pick"))))
             return self.err(404, "not found")
         except (KeyError, ValueError) as e:
             return self.err(400, str(e))
