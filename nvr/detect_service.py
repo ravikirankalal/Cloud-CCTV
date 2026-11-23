@@ -173,17 +173,29 @@ def _reid_boxes(nvr, ts, boxes, pres_wh):
     return None, None, None
 
 
-def _insert_detection(cur, ts, seg_id, box, score, ev, ts_start, ts_end):
+def _boxfrac(box, frame_wh):
+    """How much of the frame the box fills, as the larger of its width/height fractions (0..1+). ~1 means
+    an EXTREME close-up (the person fills the frame → a partial, distorted crop) — poor training data."""
+    w, h = frame_wh
+    return max((box[2] - box[0]) / float(w or 1), (box[3] - box[1]) / float(h or 1))
+
+
+def _insert_detection(cur, ts, seg_id, box, score, ev, ts_start, ts_end, focus=None, boxfrac=None):
     """Insert one detection row (the caller saves its crop) and return its id. Shared by the per-frame and
     the track paths so the row shape — including the [ts_start, ts_end] presence span — stays identical.
-    ts is the representative/best-shot time to navigate to; the span is when the person was actually seen."""
+    ts is the representative/best-shot time to navigate to; the span is when the person was actually seen.
+    `focus` (detect.focus_score) and `boxfrac` (_boxfrac) are crop-quality signals the training gallery
+    gates on, so blurry or extreme close-up crops never seed a person's prototypes."""
     emb = array.array("f", [float(x) for x in ev])
     ident = match_known(cur, emb)
     idv = cur.var(oracledb.NUMBER)
-    cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id, ts_start, ts_end)
-                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8) RETURNING id INTO :9""",
+    cur.execute("""INSERT INTO detections (ts, seg_id, box, score, embedding, identity_id, ts_start, ts_end,
+                                           focus, boxfrac)
+                   VALUES (:1, :2, :3, :4, :5, :6, :7, :8, :9, :10) RETURNING id INTO :11""",
                 (ts, seg_id, ",".join(str(int(v)) for v in box),
-                 float(score), emb, ident, float(ts_start), float(ts_end), idv))
+                 float(score), emb, ident, float(ts_start), float(ts_end),
+                 (float(focus) if focus is not None else None),
+                 (float(boxfrac) if boxfrac is not None else None), idv))
     return int(idv.getvalue()[0])
 
 
@@ -201,8 +213,10 @@ def process_segment(nvr, cur, seg_id, gate=None):
         rframe, rseg, rboxes = _reid_boxes(nvr, ts, sd_boxes, pres_wh)
         if rframe is None:                                # no HD there: re-ID on the presence frame
             rframe, rseg, rboxes = frame, seg_id, sd_boxes
+        rwh = (rframe.shape[1], rframe.shape[0])
         for b, hbox, ev in zip(boxes, rboxes, detect.embed(rframe, rboxes)):
-            did = _insert_detection(cur, ts, rseg, hbox, b["score"], ev, ts, ts)
+            did = _insert_detection(cur, ts, rseg, hbox, b["score"], ev, ts, ts,
+                                    focus=detect.focus_score(rframe, hbox), boxfrac=_boxfrac(hbox, rwh))
             _save_crop(rframe, hbox, did)
             stored += 1
     return stored
@@ -324,7 +338,9 @@ def make_finalize(nvr_h, cur, pres_wh_box, stats):
         rframe, rseg, rbox, ev = _reid_vec(nvr, ts, seg_id, box, pres_wh_box[0])
         if rframe is None:
             return
-        did = _insert_detection(cur, ts, rseg, rbox, score, ev, s0, s1)   # DB error propagates -> reconnect
+        did = _insert_detection(cur, ts, rseg, rbox, score, ev, s0, s1,    # DB error propagates -> reconnect
+                                focus=detect.focus_score(rframe, rbox),
+                                boxfrac=_boxfrac(rbox, (rframe.shape[1], rframe.shape[0])))
         try:
             _save_crop(rframe, rbox, did)
         except Exception as e:
@@ -595,9 +611,43 @@ def reembed_sd():
     orc.close()
 
 
+def backfill_quality():
+    """Fill the crop-quality signals (`focus` sharpness, `boxfrac` zoom) for stored detections that lack
+    them: focus from the saved crop jpeg, boxfrac from the stored box vs its frame size (HD 2304x1296 when
+    the box exceeds the SD frame, else SD 800x448). Lets the training gate apply to history. Safe to re-run."""
+    from PIL import Image
+    orc = adb.connect(); cur = orc.cursor()
+    cur.execute("SELECT id, box FROM detections WHERE focus IS NULL OR boxfrac IS NULL ORDER BY id")
+    rows = cur.fetchall()
+    print(f"quality backfill: {len(rows)} rows missing focus/boxfrac", flush=True)
+    done = skip = 0
+    for did, box in rows:
+        did = int(did)
+        p = os.path.join(CROP_DIR, f"{did}.jpg")
+        if not os.path.exists(p) or not box:
+            skip += 1; continue
+        try:
+            a = np.asarray(Image.open(p).convert("RGB"))
+            foc = float(detect.focus_score(a))
+            b = [float(v) for v in box.split(",")]
+            wh = (2304, 1296) if (b[2] > 800 or b[3] > 448) else (800, 448)
+            cur.execute("UPDATE detections SET focus = :1, boxfrac = :2 WHERE id = :3",
+                        (foc, float(_boxfrac(b, wh)), did))
+            done += 1
+        except Exception as e:
+            print(f"  det {did} skip: {e}", flush=True); skip += 1
+        if (done + skip) % 200 == 0:
+            orc.commit(); print(f"  {done+skip}/{len(rows)}", flush=True)
+    orc.commit()
+    print(f"quality backfill done: {done} set, {skip} skipped (no crop)", flush=True)
+    orc.close()
+
+
 if __name__ == "__main__":
     if len(sys.argv) >= 2 and sys.argv[1] == "run":
         run()
+    elif len(sys.argv) >= 2 and sys.argv[1] == "backfill-quality":
+        backfill_quality()
     elif len(sys.argv) >= 4 and sys.argv[1] == "backfill":
         backfill(int(sys.argv[2]), int(sys.argv[3]))
     elif len(sys.argv) >= 2 and sys.argv[1] == "backfill-crops":
