@@ -75,6 +75,8 @@ header{display:flex;align-items:center;gap:11px;margin-bottom:6px;padding:4px 2p
   background:rgba(9,15,14,.8);padding:1px 6px;border-radius:7px;color:var(--text)}
 .thumb .bad{position:absolute;left:4px;top:4px;font-size:10px;font-weight:600;background:var(--rust);color:#fff;padding:1px 6px;border-radius:7px}
 .thumb .man{position:absolute;left:4px;top:4px;font-size:10px;font-weight:700;background:var(--good);color:#06120b;padding:1px 6px;border-radius:7px}
+.thumb .cov{position:absolute;right:4px;bottom:4px;font-size:11px;line-height:1;background:var(--amber);color:var(--amber-ink);padding:2px 5px;border-radius:7px;font-weight:700}
+.thumb.iscover{outline:2.5px solid var(--amber);outline-offset:-2.5px}
 .ghost{background:transparent;color:var(--muted)}
 .thumb.sel{outline:2.5px solid var(--amber);outline-offset:-2.5px}
 .thumb .chk{position:absolute;right:4px;top:4px;width:22px;height:22px;border-radius:50%;background:rgba(9,15,14,.65);
@@ -129,6 +131,7 @@ body.sel .thumb .chk{display:inline-flex}
     <div class="bar" id="actions" hidden>
       <span class="pill" id="selcount">0 selected</span>
       <div class="spacer"></div>
+      <button id="coverBtn" title="Use this one crop as the person's cover (select exactly one)">★ Cover</button>
       <button id="useBtn" title="Force these into the training gallery">Use&nbsp;✓</button>
       <button id="offBtn" title="Keep this person, but exclude from training">Exclude</button>
       <button id="autoBtn" class="ghost" title="Back to automatic quality filter">Auto</button>
@@ -155,7 +158,7 @@ function badge(d){
   return{c:'bad',t};
 }
 
-let st={view:'list',person:null,dets:[],filter:'all',selecting:false,sel:new Set()};
+let st={view:'list',person:null,dets:[],cover:null,filter:'all',selecting:false,sel:new Set()};
 
 async function loadList(){
   $('people').innerHTML='<div class="sk" style="aspect-ratio:1/1"></div>'.repeat(6);
@@ -178,7 +181,7 @@ async function openPerson(id,name){
   $('crops').innerHTML='<div class="sk" style="aspect-ratio:3/4"></div>'.repeat(8);$('dempty').hidden=true;
   history.pushState({person:id},'');
   let d;try{d=await api('/detapi/training_person?id='+id);}catch(e){$('crops').innerHTML='<div class="empty">Could not load.</div>';return;}
-  st.dets=d.detections||[];
+  st.dets=d.detections||[];st.cover=d.cover??null;
   renderStats();renderCrops();
 }
 function renderStats(){
@@ -192,11 +195,12 @@ function renderCrops(){
   const list=st.dets.filter(d=>f==='all'||(f==='train'&&d.used)||(f==='excluded'&&!d.used));
   $('dempty').hidden=list.length>0;
   $('crops').innerHTML=list.map(d=>{
-    const b=badge(d);
-    return `<div class="thumb ${d.used?'':'ex'} ${st.sel.has(d.id)?'sel':''}" data-id="${d.id}">
+    const b=badge(d),cover=d.id===st.cover;
+    return `<div class="thumb ${d.used?'':'ex'} ${st.sel.has(d.id)?'sel':''} ${cover?'iscover':''}" data-id="${d.id}">
       <img src="${cropUrl(d.id)}" loading="lazy" onerror="this.closest('.thumb').remove()">
       <span class="sc">${d.score!=null?d.score.toFixed(2):'–'}</span>
       ${b?`<span class="${b.c}">${b.t}</span>`:''}
+      ${cover?'<span class="cov">★</span>':''}
       <span class="chk">✓</span></div>`;}).join('');
   $('crops').querySelectorAll('.thumb').forEach(t=>t.onclick=()=>tapThumb(+t.dataset.id));
 }
@@ -210,6 +214,7 @@ function exitSelect(){st.selecting=false;st.sel.clear();document.body.classList.
 function updateActions(){
   const n=st.sel.size;$('selcount').textContent=n+' selected';
   ['useBtn','offBtn','autoBtn','rmBtn'].forEach(b=>$(b).disabled=!n);
+  $('coverBtn').disabled=(n!==1);
 }
 $('selBtn').onclick=()=>{if(st.selecting)exitSelect();else enterSelect();};
 async function act(btn,fn,msg){
@@ -226,6 +231,7 @@ $('useBtn').onclick =()=>act('useBtn', ids=>setpick(ids,1),   n=>n+' set to alwa
 $('offBtn').onclick =()=>act('offBtn', ids=>setpick(ids,0),   n=>n+' excluded from training');
 $('autoBtn').onclick=()=>act('autoBtn',ids=>setpick(ids,null),n=>n+' back to auto');
 $('rmBtn').onclick  =()=>act('rmBtn', ids=>post('/detapi/unassign',{ids}).then(()=>{st.dets=st.dets.filter(d=>!ids.includes(d.id));}), n=>n+' removed from '+(st.person.name||'person'));
+$('coverBtn').onclick=()=>{if(st.sel.size!==1)return;act('coverBtn', ids=>post('/detapi/set_cover',{id:st.person.id,det:ids[0]}).then(()=>{st.cover=ids[0];}), ()=>'cover set');};
 $('filter').querySelectorAll('button').forEach(b=>b.onclick=()=>{
   st.filter=b.dataset.f;$('filter').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));renderCrops();});
 function toList(){st.view='list';st.person=null;exitSelect();$('detailView').hidden=true;$('listView').hidden=false;

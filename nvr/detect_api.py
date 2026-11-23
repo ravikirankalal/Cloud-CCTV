@@ -22,6 +22,7 @@
 #   POST /detapi/reject   {id|ids}      mark one/many groups 'not a person' (hidden)
 #   POST /detapi/unassign {id|ids}      remove detection(s) from their identity, back to the unknown pool
 #   POST /detapi/train_pick {id|ids,pick} force crops into(1)/out of(0)/auto(null) the training gallery
+#   POST /detapi/set_cover {id,det}     set a person's cover crop (det=null clears to auto); display-only
 #   POST /detapi/rename   {id,name}     rename an identity (merges into an existing same-name person)
 import json
 import os
@@ -99,6 +100,15 @@ def has_crop(det_id):
     return os.path.exists(os.path.join(CROP_DIR, f"{det_id}.jpg"))
 
 
+def _cover(cur, ident_id):
+    """The user-chosen cover crop for an identity (identities.cover_id), or None to fall back to an
+    auto-picked sample. None if the chosen crop's file is gone."""
+    cur.execute("SELECT cover_id FROM identities WHERE id = :1", [ident_id])
+    r = cur.fetchone()
+    cid = int(r[0]) if r and r[0] is not None else None
+    return cid if (cid is not None and has_crop(cid)) else None
+
+
 # ---- queries ----
 def people(frm=None, to=None):
     """Known people. With a [frm,to) epoch range, only those seen in it, counts/sample scoped to it."""
@@ -117,6 +127,9 @@ def people(frm=None, to=None):
         return cur.fetchall()
 
     def pick_sample(cur, ident_id):
+        cv = _cover(cur, ident_id)
+        if cv:
+            return cv
         if ranged:
             cur.execute("""SELECT id FROM detections WHERE identity_id = :1 AND ts >= :2 AND ts < :3
                            ORDER BY confirmed DESC, id DESC FETCH FIRST 12 ROWS ONLY""", [ident_id, frm, to])
@@ -191,7 +204,7 @@ def training():
                        WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC""", [iid])
         rows = cur.fetchall()
         used = sum(1 for _, s, f, b, p in rows if _trained(s, f, b, p))
-        sample = next((int(r[0]) for r in rows if has_crop(int(r[0]))), None)
+        sample = _cover(cur, iid) or next((int(r[0]) for r in rows if has_crop(int(r[0]))), None)
         return used, sample
 
     out = []
@@ -206,13 +219,13 @@ def training_person(ident_id):
     """One person's full TRAINING set (every manually-confirmed crop, all dates) with the quality signals
     and whether each actually trains, so the user can prune blurry / zoomed / wrong crops from the gallery."""
     def q(cur):
-        cur.execute("SELECT name FROM identities WHERE id = :1", [ident_id])
+        cur.execute("SELECT name, cover_id FROM identities WHERE id = :1", [ident_id])
         nm = cur.fetchone()
         cur.execute("""SELECT id, ts, score, focus, boxfrac, train_pick FROM detections
                        WHERE identity_id = :1 AND confirmed = 1 ORDER BY id DESC
                        FETCH FIRST 1500 ROWS ONLY""", [ident_id])
-        return (nm[0] if nm else None), cur.fetchall()
-    name, rows = db(q)
+        return (nm[0] if nm else None), (int(nm[1]) if nm and nm[1] is not None else None), cur.fetchall()
+    name, cover, rows = db(q)
     dets = []
     for d, t, s, f, b, p in rows:
         if not has_crop(int(d)):
@@ -221,7 +234,7 @@ def training_person(ident_id):
                      "focus": round(float(f), 3) if f is not None else None,
                      "boxfrac": round(float(b), 2) if b is not None else None,
                      "pick": (int(p) if p is not None else None), "used": _trained(s, f, b, p)})
-    return {"name": name, "detections": dets}
+    return {"name": name, "cover": cover, "detections": dets}
 
 
 def group(rep_id, frm=None, to=None):
@@ -279,6 +292,21 @@ def rename(ident_id, name):
         match.rebuild_protos(cur, surviving)
         changed = match.rematch(cur)
         return {"ok": True, "identity": surviving, "rematched": changed}
+    return db(w, write=True)
+
+
+def set_cover(ident_id, det_id):
+    """Set (or clear, det_id=None) the cover crop shown for a person on the people / training grids.
+    The crop must be a confirmed crop of this identity. Display-only — no gallery rebuild."""
+    def w(cur):
+        if det_id is not None:
+            cur.execute("SELECT 1 FROM detections WHERE id = :1 AND identity_id = :2 AND confirmed = 1",
+                        [int(det_id), int(ident_id)])
+            if not cur.fetchone():
+                return {"ok": False, "error": "crop not a confirmed crop of this person"}
+        cur.execute("UPDATE identities SET cover_id = :1 WHERE id = :2",
+                    [int(det_id) if det_id is not None else None, int(ident_id)])
+        return {"ok": True, "id": int(ident_id), "cover": (int(det_id) if det_id is not None else None)}
     return db(w, write=True)
 
 
@@ -513,6 +541,11 @@ class H(BaseHTTPRequestHandler):
                 if not ids:
                     return self.err(400, "need id(s)")
                 return self.send(200, json.dumps(train_pick(ids, b.get("pick"))))
+            if u.path == "/detapi/set_cover":
+                if "id" not in b:
+                    return self.err(400, "need id")
+                det = b.get("det")
+                return self.send(200, json.dumps(set_cover(int(b["id"]), None if det is None else int(det))))
             return self.err(404, "not found")
         except (KeyError, ValueError) as e:
             return self.err(400, str(e))
