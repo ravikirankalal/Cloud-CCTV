@@ -508,7 +508,10 @@ async function openDetail(o){
     if(!name){ toast('Enter a name', true); return; }
     try{
       if (isP){ await api.post('/detapi/rename', {id:o.id, name}); toast(`Saved ${name}`); }
-      else { const r = await api.post('/detapi/tag', {id:o.id, name}); toast(`Tagged ${name}${r.rematched?` · ${r.rematched} re-matched`:''}`); }
+      // Tag via a crop STILL IN the group, not o.id: pruning the representative first detaches it
+      // (unassign sets cluster_id=id), so tagging o.id would re-tag only the removed crop and miss the group.
+      else { const gid = dets.length ? dets[0].id : o.id;
+        const r = await api.post('/detapi/tag', {id:gid, name}); toast(`Tagged ${name}${r.rematched?` · ${r.rematched} re-matched`:''}`); }
       DIRTY = true; closeSheet();
     }catch(e){ toast(e==='auth'?'Sign in first':'Save failed', true); }
   });
@@ -524,7 +527,8 @@ async function openDetail(o){
   });
 
   if (!isP) $('pdismiss').onclick = e => withBusy(e.currentTarget, async () => {
-    try{ await api.post('/detapi/reject', {id:o.id}); DIRTY = true; closeSheet(); toast('Dismissed'); }
+    const gid = dets.length ? dets[0].id : o.id;   // dismiss via a surviving group member (see tag note above)
+    try{ await api.post('/detapi/reject', {id:gid}); DIRTY = true; closeSheet(); toast('Dismissed'); }
     catch(e){ toast(e==='auth'?'Sign in first':'Failed', true); }
   });
 }
