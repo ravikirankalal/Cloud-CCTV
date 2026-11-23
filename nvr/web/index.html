@@ -573,6 +573,9 @@ bar.addEventListener('pointerup', e => {
   // only way to reach the visible region); when the handle IS visible, a tap elsewhere never moves it.
   if (m === 'scrub' || (m === 'pending' && playheadX() == null)) { st.center = t; seekWall(t); }
 });
+// touch: the browser can arbitrate a scrub into a scroll and fire pointercancel instead of pointerup.
+// Without this the 'mode' flag stays stuck and the clock/draw loop (which bails while mode is set) freezes.
+bar.addEventListener('pointercancel', () => { mode = null; });
 bar.addEventListener('wheel', e => {
   if (st.zoom === 24) return;                  // whole day already shown
   e.preventDefault();
