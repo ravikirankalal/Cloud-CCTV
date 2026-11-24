@@ -63,10 +63,13 @@ HD_CONFIRM_IOU = float(os.environ.get("DET_HD_CONFIRM_IOU", "0.3"))  # min IoU o
 # scaled SD box; that lag is the offset. Cache it and reuse it (one HD decode/hit) until matches stop landing
 # — which is itself the "a reconnect happened" signal — then recalibrate. Supersedes the naive same-ts
 # HD_CONFIRM when on, and does re-ID + confirm from the SAME aligned HD frame.
+# SD presence + wide-window HD re-ID, FAIL-OPEN: sweep a wide offset window once per run to learn the
+# HD<->SD clock offset (it mostly sits near 0 but jumps to ~-18s at a camera reconnect), cache it, re-ID off
+# the aligned sharp HD frame, and fall back to the SD best shot (never drop) when HD can't be aligned.
 HD_ALIGN = os.environ.get("DET_HD_ALIGN", "0") != "0"
-HD_ALIGN_LO = float(os.environ.get("DET_HD_ALIGN_LO", "-2"))    # calibration search window low  (s, ts+lo)
-HD_ALIGN_HI = float(os.environ.get("DET_HD_ALIGN_HI", "6"))     # calibration search window high (s, ts+hi)
-HD_ALIGN_STEP = float(os.environ.get("DET_HD_ALIGN_STEP", "1")) # calibration step (s); offset resolution
+HD_ALIGN_LO = float(os.environ.get("DET_HD_ALIGN_LO", "-22"))   # calibration search window low  (s, ts+lo)
+HD_ALIGN_HI = float(os.environ.get("DET_HD_ALIGN_HI", "8"))     # calibration search window high (s, ts+hi)
+HD_ALIGN_STEP = float(os.environ.get("DET_HD_ALIGN_STEP", "2")) # calibration step (s); offset resolution
 HD_ALIGN_IOU = float(os.environ.get("DET_HD_ALIGN_IOU", "0.3")) # IoU for a scaled-SD box vs a HD person-box
 HD_MISS_MAX = int(os.environ.get("DET_HD_MISS_MAX", "4"))       # consecutive misses before recalibrating
 HD_RECAL_MIN = float(os.environ.get("DET_HD_RECAL_MIN", "20"))  # min seconds between calibration sweeps
@@ -278,10 +281,11 @@ def _hd_calibrate(nvr, ts, sd_box, pres_wh):
 
 def _aligned_hd(nvr, ts, sd_box, pres_wh):
     """Resolve one SD box against the time-aligned HD frame. Returns (hd_frame, hd_seg, hd_box, matched):
-    matched=True => a HD person-box overlaps the aligned SD box, so the detection is confirmed and hd_box is
-    the sharp HD box to crop/embed; matched=False => HD did not confirm it (drift-tolerant reject — drops SD
-    false positives incl. animals). Uses the cached offset, calibrating when unset (respecting a cooldown)
-    and invalidating the cache after HD_MISS_MAX consecutive misses (a reconnect shifted the offset)."""
+    matched=True => a HD person-box overlaps the aligned SD box, so hd_box is the sharp HD box to crop/embed;
+    matched=False => HD couldn't align it here (gap, drift not yet relearned, or no overlapping HD box). The
+    caller FAILS OPEN on matched=False (keeps the sighting on the SD best shot) rather than dropping, so a real
+    person is never lost to a miss. Uses the cached offset, calibrating when unset (respecting a cooldown) and
+    invalidating the cache after HD_MISS_MAX consecutive misses (a reconnect shifted the offset)."""
     if pres_wh is None:
         return None, None, None, False
     if not _HD["ok"] and (time.time() - _HD["last_cal"] >= HD_RECAL_MIN):
@@ -341,11 +345,11 @@ def process_segment(nvr, cur, seg_id, gate=None):
         return 0
     stored = 0
     for ts, frame, boxes in frames:
-        if HD_ALIGN:                                      # option b: each box re-ID'd + confirmed on aligned HD
+        if HD_ALIGN:                                      # SD presence + wide-window HD re-ID, FAIL-OPEN
             for b in boxes:
                 rframe, rseg, rbox, ok = _aligned_hd(nvr, ts, b["box"], pres_wh)
-                if not ok:
-                    continue
+                if not ok:                                # couldn't align HD -> keep on the SD presence frame
+                    rframe, rseg, rbox = frame, seg_id, b["box"]
                 ev = detect.embed(rframe, [rbox])[0]
                 did = _insert_detection(cur, ts, rseg, rbox, b["score"], ev, ts, ts,
                                         focus=detect.focus_score(rframe, rbox),
@@ -485,11 +489,14 @@ def make_finalize(nvr_h, cur, pres_wh_box, stats):
     def finalize(obs, s0, s1):
         nvr = nvr_h[0]
         ts, seg_id, box, score = max(obs, key=lambda o: _quality(o[2], o[3]))
-        if HD_ALIGN:                                       # option b: time-aligned HD re-ID + confirm in one
+        if HD_ALIGN:                                       # SD presence + wide-window HD re-ID, FAIL-OPEN
             rframe, rseg, rbox, ok = _aligned_hd(nvr, ts, box, pres_wh_box[0])
-            if not ok:
-                return                                     # HD didn't confirm the best shot (incl. animals): drop
-            ev = detect.embed(rframe, [rbox])[0]
+            if ok:
+                ev = detect.embed(rframe, [rbox])[0]       # aligned sharp HD crop + embedding
+            else:                                          # couldn't align HD -> keep the sighting on the SD best
+                rframe, rseg, rbox, ev = _reid_vec(nvr, ts, seg_id, box, pres_wh_box[0])  # shot (NEVER drop)
+                if rframe is None:
+                    return
         else:
             if HD_CONFIRM and pres_wh_box[0] and not _hd_confirm(nvr, ts, [box], pres_wh_box[0])[0]:
                 return                                     # HD didn't re-confirm the track's best shot: drop
@@ -591,9 +598,10 @@ def run():
     if REID_STREAM:
         print(f"presence on '{STREAM}', re-ID crops from '{REID_STREAM}' (HD decoded only on a hit)", flush=True)
     if HD_ALIGN:
-        print(f"HD align+confirm ON: calibrate HD<->SD offset on '{HD_CONFIRM_STREAM}' over "
+        print(f"HD re-ID (wide-window, FAIL-OPEN) ON: calibrate HD<->SD offset on '{HD_CONFIRM_STREAM}' over "
               f"[{HD_ALIGN_LO:+g},{HD_ALIGN_HI:+g}]s @ {HD_ALIGN_STEP}s, match IoU>={HD_ALIGN_IOU}, "
-              f"recal after {HD_MISS_MAX} misses (>={HD_RECAL_MIN}s apart)", flush=True)
+              f"recal after {HD_MISS_MAX} misses (>={HD_RECAL_MIN}s apart); SD best-shot fallback on a miss",
+              flush=True)
     elif HD_CONFIRM:
         print(f"HD-confirm ON: validate on '{HD_CONFIRM_STREAM}', keep an SD box only if a HD person-box "
               f"overlaps (IoU>={HD_CONFIRM_IOU}); crops stay SD-aligned", flush=True)
