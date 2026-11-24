@@ -56,6 +56,21 @@ HD_CONFIRM = os.environ.get("DET_HD_CONFIRM", "0") != "0"   # optional: after SD
 #   HD/SD crop drift. Costs a 2nd YOLOX pass on HD per hit (per track best-shot in track mode), off by default.
 HD_CONFIRM_STREAM = os.environ.get("DET_HD_CONFIRM_STREAM") or (REID_STREAM or "cam1")  # HD stream to confirm on
 HD_CONFIRM_IOU = float(os.environ.get("DET_HD_CONFIRM_IOU", "0.3"))  # min IoU of a scaled-SD box vs some HD box
+# HD content-alignment (option "b"): the HD stream lags/leads SD by a per-RUN offset (the difference in the
+# two streams' first-frame latency); it is constant within a run but re-anchors at every reconnect, and the
+# recorder's own timestamps don't expose it. So instead of a fixed offset we CALIBRATE from content: on the
+# first detection of a run, search a small time window for the HD frame whose person-box best matches the
+# scaled SD box; that lag is the offset. Cache it and reuse it (one HD decode/hit) until matches stop landing
+# — which is itself the "a reconnect happened" signal — then recalibrate. Supersedes the naive same-ts
+# HD_CONFIRM when on, and does re-ID + confirm from the SAME aligned HD frame.
+HD_ALIGN = os.environ.get("DET_HD_ALIGN", "0") != "0"
+HD_ALIGN_LO = float(os.environ.get("DET_HD_ALIGN_LO", "-2"))    # calibration search window low  (s, ts+lo)
+HD_ALIGN_HI = float(os.environ.get("DET_HD_ALIGN_HI", "6"))     # calibration search window high (s, ts+hi)
+HD_ALIGN_STEP = float(os.environ.get("DET_HD_ALIGN_STEP", "1")) # calibration step (s); offset resolution
+HD_ALIGN_IOU = float(os.environ.get("DET_HD_ALIGN_IOU", "0.3")) # IoU for a scaled-SD box vs a HD person-box
+HD_MISS_MAX = int(os.environ.get("DET_HD_MISS_MAX", "4"))       # consecutive misses before recalibrating
+HD_RECAL_MIN = float(os.environ.get("DET_HD_RECAL_MIN", "20"))  # min seconds between calibration sweeps
+_HD = {"off": 0.0, "ok": False, "miss": 0, "last_cal": 0.0}     # per-run HD->SD offset cache (module state)
 
 os.makedirs(CROP_DIR, exist_ok=True)
 
@@ -208,6 +223,88 @@ def _hd_confirm(nvr, ts, sd_boxes, pres_wh):
     return [any(_iou(s, h) >= HD_CONFIRM_IOU for h in hd_dets) for s in scaled]
 
 
+# ---- HD content-alignment (option "b"): calibrate a per-run HD->SD offset from content, cache it ----
+def _hd_reset():
+    """Forget the cached offset so the next detection recalibrates. Called when the detector (re)connects."""
+    _HD.update(off=0.0, ok=False, miss=0, last_cal=0.0)
+
+
+def _hd_decode(nvr, t):
+    """Decode the HD align/confirm stream (HD_CONFIRM_STREAM) frame covering wall-clock `t`:
+    (seg_id, frame), or (None, None) when that stream has no footage at `t`."""
+    row = nvr.execute("SELECT id, start, dur, path, init FROM segments WHERE stream = ? AND start <= ? "
+                      "ORDER BY start DESC LIMIT 1", (HD_CONFIRM_STREAM, t)).fetchone()
+    if not row:
+        return None, None
+    sid, start, dur, path, init = row
+    if dur and t > float(start) + float(dur):
+        return None, None
+    return int(sid), detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path), max(0.0, t - float(start)))
+
+
+def _hd_best(frame, scaled):
+    """The HD person-box in `frame` that best overlaps `scaled` (an SD box in HD px), and that IoU."""
+    best, biou = None, 0.0
+    for d in detect.detect_in(frame):
+        v = _iou(scaled, d["box"])
+        if v > biou:
+            biou, best = v, d["box"]
+    return best, biou
+
+
+def _hd_calibrate(nvr, ts, sd_box, pres_wh):
+    """Sweep the offset window for the HD frame whose person-box best matches the scaled SD box; on a match
+    (IoU >= HD_ALIGN_IOU) set the cache and return (frame, seg_id, hd_box), else return None (e.g. an SD
+    animal/noise FP that no HD frame confirms). One HD decode + YOLOX per grid step — runs only to (re)learn
+    the offset, then the cache serves every hit for the rest of the run."""
+    _HD["last_cal"] = time.time()
+    n = max(1, int(round((HD_ALIGN_HI - HD_ALIGN_LO) / HD_ALIGN_STEP)))
+    best = None                                              # (iou, k, frame, seg, hd_box)
+    for i in range(n + 1):
+        k = round(HD_ALIGN_LO + i * HD_ALIGN_STEP, 3)
+        seg, f = _hd_decode(nvr, ts + k)
+        if f is None:
+            continue
+        scaled = _scale_box(sd_box, pres_wh, (f.shape[1], f.shape[0]))
+        hb, iou = _hd_best(f, scaled)
+        if hb is not None and (best is None or iou > best[0]):
+            best = (iou, k, f, seg, hb)
+    if best and best[0] >= HD_ALIGN_IOU:
+        _HD.update(off=best[1], ok=True, miss=0)
+        print(f"  HD align: calibrated offset={best[1]:+.2f}s (IoU {best[0]:.2f})", flush=True)
+        return best[2], best[3], best[4]
+    return None
+
+
+def _aligned_hd(nvr, ts, sd_box, pres_wh):
+    """Resolve one SD box against the time-aligned HD frame. Returns (hd_frame, hd_seg, hd_box, matched):
+    matched=True => a HD person-box overlaps the aligned SD box, so the detection is confirmed and hd_box is
+    the sharp HD box to crop/embed; matched=False => HD did not confirm it (drift-tolerant reject — drops SD
+    false positives incl. animals). Uses the cached offset, calibrating when unset (respecting a cooldown)
+    and invalidating the cache after HD_MISS_MAX consecutive misses (a reconnect shifted the offset)."""
+    if pres_wh is None:
+        return None, None, None, False
+    if not _HD["ok"] and (time.time() - _HD["last_cal"] >= HD_RECAL_MIN):
+        got = _hd_calibrate(nvr, ts, sd_box, pres_wh)
+        if got:
+            return got[0], got[1], got[2], True
+        return None, None, None, False                      # couldn't calibrate on this box -> unconfirmed
+    seg, f = _hd_decode(nvr, ts + _HD["off"])               # cached offset (or default while in cooldown)
+    if f is None:
+        return None, None, None, False
+    scaled = _scale_box(sd_box, pres_wh, (f.shape[1], f.shape[0]))
+    hb, iou = _hd_best(f, scaled)
+    if iou >= HD_ALIGN_IOU:
+        _HD["miss"] = 0
+        _HD["ok"] = True                                    # a good match confirms the offset is current
+        return f, seg, hb, True
+    _HD["miss"] += 1
+    if _HD["ok"] and _HD["miss"] >= HD_MISS_MAX:
+        _HD["ok"] = False                                   # stale: recalibrate on a later hit (cooldown-gated)
+        print(f"  HD align: {_HD['miss']} consecutive misses; will recalibrate", flush=True)
+    return f, seg, scaled, False
+
+
 def _boxfrac(box, frame_wh):
     """How much of the frame the box fills, as the larger of its width/height fractions (0..1+). ~1 means
     an EXTREME close-up (the person fills the frame → a partial, distorted crop) — poor training data."""
@@ -244,6 +341,18 @@ def process_segment(nvr, cur, seg_id, gate=None):
         return 0
     stored = 0
     for ts, frame, boxes in frames:
+        if HD_ALIGN:                                      # option b: each box re-ID'd + confirmed on aligned HD
+            for b in boxes:
+                rframe, rseg, rbox, ok = _aligned_hd(nvr, ts, b["box"], pres_wh)
+                if not ok:
+                    continue
+                ev = detect.embed(rframe, [rbox])[0]
+                did = _insert_detection(cur, ts, rseg, rbox, b["score"], ev, ts, ts,
+                                        focus=detect.focus_score(rframe, rbox),
+                                        boxfrac=_boxfrac(rbox, (rframe.shape[1], rframe.shape[0])))
+                _save_crop(rframe, rbox, did)
+                stored += 1
+            continue
         sd_boxes = [b["box"] for b in boxes]
         if HD_CONFIRM:                                    # validate on HD first, then re-ID the survivors
             keep = _hd_confirm(nvr, ts, sd_boxes, pres_wh)
@@ -376,11 +485,17 @@ def make_finalize(nvr_h, cur, pres_wh_box, stats):
     def finalize(obs, s0, s1):
         nvr = nvr_h[0]
         ts, seg_id, box, score = max(obs, key=lambda o: _quality(o[2], o[3]))
-        if HD_CONFIRM and pres_wh_box[0] and not _hd_confirm(nvr, ts, [box], pres_wh_box[0])[0]:
-            return                                         # HD didn't re-confirm the track's best shot: drop
-        rframe, rseg, rbox, ev = _reid_vec(nvr, ts, seg_id, box, pres_wh_box[0])
-        if rframe is None:
-            return
+        if HD_ALIGN:                                       # option b: time-aligned HD re-ID + confirm in one
+            rframe, rseg, rbox, ok = _aligned_hd(nvr, ts, box, pres_wh_box[0])
+            if not ok:
+                return                                     # HD didn't confirm the best shot (incl. animals): drop
+            ev = detect.embed(rframe, [rbox])[0]
+        else:
+            if HD_CONFIRM and pres_wh_box[0] and not _hd_confirm(nvr, ts, [box], pres_wh_box[0])[0]:
+                return                                     # HD didn't re-confirm the track's best shot: drop
+            rframe, rseg, rbox, ev = _reid_vec(nvr, ts, seg_id, box, pres_wh_box[0])
+            if rframe is None:
+                return
         did = _insert_detection(cur, ts, rseg, rbox, score, ev, s0, s1,    # DB error propagates -> reconnect
                                 focus=detect.focus_score(rframe, rbox),
                                 boxfrac=_boxfrac(rbox, (rframe.shape[1], rframe.shape[0])))
@@ -475,7 +590,11 @@ def run():
         print(f"motion gate ON (min_px={GATE_MIN_PX}, k={GATE_K}): YOLOX runs only on foreground frames", flush=True)
     if REID_STREAM:
         print(f"presence on '{STREAM}', re-ID crops from '{REID_STREAM}' (HD decoded only on a hit)", flush=True)
-    if HD_CONFIRM:
+    if HD_ALIGN:
+        print(f"HD align+confirm ON: calibrate HD<->SD offset on '{HD_CONFIRM_STREAM}' over "
+              f"[{HD_ALIGN_LO:+g},{HD_ALIGN_HI:+g}]s @ {HD_ALIGN_STEP}s, match IoU>={HD_ALIGN_IOU}, "
+              f"recal after {HD_MISS_MAX} misses (>={HD_RECAL_MIN}s apart)", flush=True)
+    elif HD_CONFIRM:
         print(f"HD-confirm ON: validate on '{HD_CONFIRM_STREAM}', keep an SD box only if a HD person-box "
               f"overlaps (IoU>={HD_CONFIRM_IOU}); crops stay SD-aligned", flush=True)
     if TRACK:
@@ -489,6 +608,8 @@ def run():
             orc = adb.connect(); cur = orc.cursor()
             # per-connection so a reconnect restarts cleanly (in-flight tracks are dropped, re-acquired live)
             stats = {"n": 0}; pres_wh_box = [None]
+            if HD_ALIGN:
+                _hd_reset()                                   # recalibrate the HD<->SD offset after a reconnect
             tracker = Tracker(make_finalize(nvr_h, cur, pres_wh_box, stats)) if TRACK else None
             newest = nvr_h[0].execute("SELECT max(id) FROM segments WHERE stream = ?", (STREAM,)).fetchone()[0] or 0
             last = get_state(cur, "last_seg_id", newest)  # first run: start at the live edge
