@@ -48,10 +48,13 @@ TRACK = os.environ.get("DET_TRACK", "0") != "0"          # track-based re-ID: gr
 TRACK_IOU = float(os.environ.get("DET_TRACK_IOU", "0.3"))   # min IoU to link a box to an open track
 TRACK_GAP = float(os.environ.get("DET_TRACK_GAP", "8"))     # close a track after this many sec (processed-ts) of no obs
 TRACK_MAX = float(os.environ.get("DET_TRACK_MAX", "25"))    # emit a chunk at least this often during a long track
-HD_CONFIRM = os.environ.get("DET_HD_CONFIRM", "0") != "0"   # optional: re-run YOLOX on the HD re-ID frame and
-#   KEEP a presence box only if a HD person-box overlaps it (IoU), so an SD false positive (a box YOLOX fires
-#   on in the blurry SD frame but not in sharp HD) is dropped BEFORE it is embedded, matched or grouped.
-#   Needs DET_REID_STREAM (nothing to confirm against otherwise); costs a 2nd YOLOX pass on HD per hit, off by default.
+HD_CONFIRM = os.environ.get("DET_HD_CONFIRM", "0") != "0"   # optional: after SD presence finds a person, decode
+#   the HD stream at the same ts, re-run YOLOX there, and KEEP the SD box only if a HD person-box overlaps it
+#   (IoU) — so an SD false positive (a box YOLOX fires on in the blurry SD frame but not in sharp HD) is dropped
+#   BEFORE it is embedded, matched or grouped. DECOUPLED from re-ID: HD is used ONLY to validate; the crop and
+#   embedding still come from the aligned SD frame (or DET_REID_STREAM when set), so this does NOT reintroduce
+#   HD/SD crop drift. Costs a 2nd YOLOX pass on HD per hit (per track best-shot in track mode), off by default.
+HD_CONFIRM_STREAM = os.environ.get("DET_HD_CONFIRM_STREAM") or (REID_STREAM or "cam1")  # HD stream to confirm on
 HD_CONFIRM_IOU = float(os.environ.get("DET_HD_CONFIRM_IOU", "0.3"))  # min IoU of a scaled-SD box vs some HD box
 
 os.makedirs(CROP_DIR, exist_ok=True)
@@ -178,17 +181,31 @@ def _reid_boxes(nvr, ts, boxes, pres_wh):
     return None, None, None
 
 
-def _hd_confirm(hd_frame, hd_boxes):
-    """Re-run YOLOX on the HD re-ID frame and return a keep-mask over hd_boxes (the SD boxes scaled to HD
-    px): True where the box overlaps some HD person detection by >= HD_CONFIRM_IOU, False otherwise — the
-    optional HD re-check that rejects SD presence false positives before embed/match/group. FAIL-OPEN: a
-    decode/inference failure keeps every box, so a confirm hiccup never loses a real sighting."""
+def _hd_confirm(nvr, ts, sd_boxes, pres_wh):
+    """Validate SD presence boxes against the HD stream, WITHOUT changing the crop/embedding source.
+    Decodes the HD confirm-stream frame covering `ts`, runs YOLOX there, and returns a keep-mask over
+    `sd_boxes` (presence px): True where the SD box (scaled to HD px) overlaps some HD person-box by
+    >= HD_CONFIRM_IOU. This is the one place a 2nd YOLOX pass runs, and only on frames SD already flagged.
+    FAIL-OPEN — an HD gap at ts, or a decode/inference error, keeps every box, so a real sighting is never
+    lost to a confirm miss; the HD frame is used ONLY to reject, never to crop (crops stay SD-aligned)."""
+    if not sd_boxes:
+        return []
     try:
-        hd_dets = [d["box"] for d in detect.detect_in(hd_frame)]
+        row = nvr.execute("SELECT start, dur, path, init FROM segments WHERE stream = ? AND start <= ? "
+                          "ORDER BY start DESC LIMIT 1", (HD_CONFIRM_STREAM, ts)).fetchone()
+        if not row:
+            return [True] * len(sd_boxes)                 # no HD stream here at all: can't confirm, keep
+        start, dur, path, init = row
+        if dur and ts > float(start) + float(dur):
+            return [True] * len(sd_boxes)                 # ts lands in an HD gap: keep
+        hd = detect.decode_frame(os.path.join(DATA, init), os.path.join(DATA, path), max(0.0, ts - float(start)))
+        hd_dets = [d["box"] for d in detect.detect_in(hd)]
+        hd_wh = (hd.shape[1], hd.shape[0])
     except Exception as e:
         print(f"  HD-confirm failed ({e}); keeping all boxes", flush=True)
-        return [True] * len(hd_boxes)
-    return [any(_iou(b, h) >= HD_CONFIRM_IOU for h in hd_dets) for b in hd_boxes]
+        return [True] * len(sd_boxes)
+    scaled = [_scale_box(b, pres_wh, hd_wh) for b in sd_boxes]
+    return [any(_iou(s, h) >= HD_CONFIRM_IOU for h in hd_dets) for s in scaled]
 
 
 def _boxfrac(box, frame_wh):
@@ -228,15 +245,15 @@ def process_segment(nvr, cur, seg_id, gate=None):
     stored = 0
     for ts, frame, boxes in frames:
         sd_boxes = [b["box"] for b in boxes]
+        if HD_CONFIRM:                                    # validate on HD first, then re-ID the survivors
+            keep = _hd_confirm(nvr, ts, sd_boxes, pres_wh)
+            boxes = [b for b, k in zip(boxes, keep) if k]
+            sd_boxes = [b for b, k in zip(sd_boxes, keep) if k]
+            if not sd_boxes:
+                continue
         rframe, rseg, rboxes = _reid_boxes(nvr, ts, sd_boxes, pres_wh)
         if rframe is None:                                # no HD there: re-ID on the presence frame
             rframe, rseg, rboxes = frame, seg_id, sd_boxes
-        elif HD_CONFIRM:                                  # optional: drop SD boxes HD doesn't re-confirm
-            keep = _hd_confirm(rframe, rboxes)
-            boxes = [b for b, k in zip(boxes, keep) if k]
-            rboxes = [b for b, k in zip(rboxes, keep) if k]
-            if not rboxes:
-                continue
         rwh = (rframe.shape[1], rframe.shape[0])
         for b, hbox, ev in zip(boxes, rboxes, detect.embed(rframe, rboxes)):
             did = _insert_detection(cur, ts, rseg, hbox, b["score"], ev, ts, ts,
@@ -337,8 +354,6 @@ def _reid_vec(nvr, ts, seg_id, box, pres_wh):
     try:
         rframe, rseg, rboxes = _reid_boxes(nvr, ts, [box], pres_wh) if pres_wh else (None, None, None)
         if rframe is not None:
-            if HD_CONFIRM and not _hd_confirm(rframe, [rboxes[0]])[0]:
-                return None, None, None, None             # HD has footage here but didn't re-confirm: drop
             return rframe, rseg, rboxes[0], detect.embed(rframe, [rboxes[0]])[0]
     except Exception as e:
         print(f"  track re-ID HD decode failed ({e}); SD fallback", flush=True)
@@ -361,6 +376,8 @@ def make_finalize(nvr_h, cur, pres_wh_box, stats):
     def finalize(obs, s0, s1):
         nvr = nvr_h[0]
         ts, seg_id, box, score = max(obs, key=lambda o: _quality(o[2], o[3]))
+        if HD_CONFIRM and pres_wh_box[0] and not _hd_confirm(nvr, ts, [box], pres_wh_box[0])[0]:
+            return                                         # HD didn't re-confirm the track's best shot: drop
         rframe, rseg, rbox, ev = _reid_vec(nvr, ts, seg_id, box, pres_wh_box[0])
         if rframe is None:
             return
@@ -458,8 +475,9 @@ def run():
         print(f"motion gate ON (min_px={GATE_MIN_PX}, k={GATE_K}): YOLOX runs only on foreground frames", flush=True)
     if REID_STREAM:
         print(f"presence on '{STREAM}', re-ID crops from '{REID_STREAM}' (HD decoded only on a hit)", flush=True)
-        if HD_CONFIRM:
-            print(f"HD-confirm ON: SD boxes kept only if a HD person-box overlaps (IoU>={HD_CONFIRM_IOU})", flush=True)
+    if HD_CONFIRM:
+        print(f"HD-confirm ON: validate on '{HD_CONFIRM_STREAM}', keep an SD box only if a HD person-box "
+              f"overlaps (IoU>={HD_CONFIRM_IOU}); crops stay SD-aligned", flush=True)
     if TRACK:
         print(f"track mode ON: IoU>={TRACK_IOU}, close after {TRACK_GAP}s idle, chunk cap {TRACK_MAX}s "
               f"(re-ID on {REID_STREAM or STREAM}, once per track)", flush=True)
