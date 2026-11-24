@@ -19,6 +19,12 @@ DATA = os.environ.get("NVR_DATA", "/home/ubuntu/nvr-data")
 STREAM = os.environ.get("NVR_STREAM", "cam1")            # presence source: sampled for YOLOX (cheap SD when set)
 REID_STREAM = os.environ.get("DET_REID_STREAM", "")      # re-ID source: "" = same frame; "cam1" = decode HD only
                                                          # for the OSNet crop when SD presence finds a person
+REID_SHOTS = int(os.environ.get("DET_REID_SHOTS", "6"))  # pool the top-N shots of a track into one averaged
+                                                         # embedding. Single-shot SD re-ID can't separate people
+                                                         # (intra-person spread 0.45-0.65 > inter-person 0.13-0.21);
+                                                         # averaging N>=3 shots cancels per-frame SD noise and the
+                                                         # same-person spread drops below the nearest other person
+                                                         # (measured: intra 0.40->0.09 at N=6). 1 = old best-shot.
 STRIDE = int(os.environ.get("DET_STRIDE", "2"))          # sample every Nth segment
 FRAMES = int(os.environ.get("DET_FRAMES", "1"))          # frames/segment at the LIVE edge (evenly spaced)
 FPS = float(os.environ.get("DET_FPS", "0"))              # live target frames/SEC; >0 overrides FRAMES (n = dur*FPS)
@@ -475,6 +481,31 @@ def _reid_vec(nvr, ts, seg_id, box, pres_wh):
     return None, None, None, None
 
 
+def _pool_embedding(nvr, obs, k, best_ev):
+    """Average the top-k shots' L2-normalized OSNet embeddings into one vector, to denoise single-frame SD
+    re-ID (the per-frame blur/pose noise cancels; the identity signal survives). `best_ev` is the already-
+    resolved embedding of the top-quality shot (reused so it isn't decoded/embedded twice). Each extra shot
+    is embedded from its own SD frame; a shot that fails to decode/embed is skipped. Returns a normalized
+    numpy vector; with k<=1 or no extra shots it just returns the best-shot vector normalized."""
+    def norm(v):
+        v = np.asarray(v, dtype=np.float32)
+        n = np.linalg.norm(v)
+        return v / n if n > 0 else v
+    vecs = [norm(best_ev)]
+    if k > 1 and len(obs) > 1:
+        ranked = sorted(obs, key=lambda o: _quality(o[2], o[3]), reverse=True)
+        for ts_i, seg_i, box_i, _score in ranked[1:k]:        # [0] is the best shot, already in vecs
+            try:
+                fr = _decode_at(nvr, seg_i, ts_i)
+                if fr is not None:
+                    vecs.append(norm(detect.embed(fr, [box_i])[0]))
+            except Exception:
+                continue                                      # a bad shot just doesn't contribute
+    m = np.mean(vecs, axis=0)
+    n = np.linalg.norm(m)
+    return m / n if n > 0 else m
+
+
 def make_finalize(nvr_h, cur, pres_wh_box, stats):
     """Build the Tracker finalize callback: pick the track's best shot, decode HD once there (SD fallback
     on a gap OR a failed HD decode), embed, insert one detection spanning [s0, s1], and save its crop.
@@ -496,6 +527,8 @@ def make_finalize(nvr_h, cur, pres_wh_box, stats):
             rframe, rseg, rbox, ev = _reid_vec(nvr, ts, seg_id, box, pres_wh_box[0])
             if rframe is None:
                 return
+            if REID_SHOTS > 1:                             # pool top-N shots -> one denoised embedding (crop/
+                ev = _pool_embedding(nvr, obs, REID_SHOTS, ev)   # focus/nav stay the best shot; only ev pools
         did = _insert_detection(cur, ts, rseg, rbox, score, ev, s0, s1,    # DB error propagates -> reconnect
                                 focus=detect.focus_score(rframe, rbox),
                                 boxfrac=_boxfrac(rbox, (rframe.shape[1], rframe.shape[0])))
@@ -598,8 +631,9 @@ def run():
         print(f"HD-confirm ON: validate on '{HD_CONFIRM_STREAM}', keep an SD box only if a HD person-box "
               f"overlaps (IoU>={HD_CONFIRM_IOU}); crops stay SD-aligned", flush=True)
     if TRACK:
+        shots = f"{REID_SHOTS}-shot pooled" if REID_SHOTS > 1 else "best-shot"
         print(f"track mode ON: IoU>={TRACK_IOU}, close after {TRACK_GAP}s idle, chunk cap {TRACK_MAX}s "
-              f"(re-ID on {REID_STREAM or STREAM}, once per track)", flush=True)
+              f"(re-ID on {REID_STREAM or STREAM}, {shots} per track)", flush=True)
     if DB_IMMUTABLE:
         print(f"remote mode: segments from snapshot '{DB_PATH}' (reopened each batch)", flush=True)
     while True:                                           # reconnect loop: a DB error drops to here
